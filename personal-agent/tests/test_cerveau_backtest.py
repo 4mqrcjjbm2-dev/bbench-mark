@@ -116,5 +116,6 @@ def test_backtest_depuis_le_tableau_de_bord(tmp_path, monkeypatch):
     assert st["activite"][0]["etapes"][0]["agent"] == "sol_paper"
     assert len(st["agents"]) == 24 and {p["id"] for p in st["personas"]} == {"cortana", "caro"}
     assert {"nexus", "pulse", "aegis", "rig", "neon", "tao"} <= {a["id"] for a in st["agents"]}
-    assert {x["id"] for x in st["connexions"]} == {"claude", "coingecko", "web", "memoire", "iphone"}
+    assert {"claude", "coingecko", "web", "memoire", "iphone", "stooq", "mempool", "etherscan", "ntfy"} <= \
+        {x["id"] for x in st["connexions"]}
     assert c.post("/api/backtests", json={"actif": "bitcoin", "jours": 30}, headers=H).status_code == 422

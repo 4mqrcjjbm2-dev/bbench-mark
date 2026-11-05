@@ -9,7 +9,9 @@ from typing import Callable
 import anthropic
 
 from . import etat
+from .agents_outils import SPECIALISTES
 from .cerveau import Cerveau
+from .cles import Cles
 from .config import Settings
 from .storage import JsonStore
 from .catalogue import AGENT_PAR_OUTIL, GUIDE_APP, OUTILS_LECTURE, PERSONAS, resume_catalogue
@@ -32,6 +34,17 @@ Outils :
 - action_iphone fait agir le téléphone (rappel, ouvrir une URL, copier, notification). \
 Utilise-la seulement quand l'utilisateur demande une action sur son téléphone. Une seule action par réponse.
 - Avant de créer un rappel daté, appelle date_heure pour connaître la date du jour.
+
+Parler québécois (VOX) : comprends les expressions du Québec (Charlevoix, Saguenay, Côte-Nord, \
+Blanc-Sablon) comme « char » (voiture), « blé d'Inde », « tantôt », « icitte », « pantoute », « jaser », \
+« magasiner », « dépanneur ». Réponds en français clair.
+
+Agents : pour chaque demande, prends le chemin le plus direct et le plus sûr. Utilise l'outil de l'agent \
+spécialisé (PULSE prix et tendances, LEDGER bourses et devises, VAULT matières premières, Sniper Pro lecture \
+technique, SOL Paper Trader backtests, ORCA portefeuilles publics, BEACON notifications et rapport, \
+consulter_specialiste pour ECHO, SILK, AURA, FESTA, FORGE, NEON, RIG, AEGIS, PRISM, Agent Pub). Appelle \
+plusieurs outils en parallèle quand ils sont indépendants. Si une source ne répond pas, dis-le en une phrase \
+et donne ce que tu as. Si une clé manque, dis exactement où la coller (page Jarvis, Connexions → Clés API).
 
 Finance : donne des données et des explications neutres. Tu ne fais pas de recommandation \
 personnalisée d'achat ou de vente ; rappelle brièvement les risques si on te le demande.
@@ -70,6 +83,13 @@ class AgentReply:
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 
+def agent_de(outil: str, entree: dict, persona: str) -> str:
+    """L'agent du Catalogue qui travaille pour cet appel (pour la Blackbox)."""
+    if outil == "consulter_specialiste" and isinstance(entree, dict) and entree.get("agent") in SPECIALISTES:
+        return entree["agent"]
+    return AGENT_PAR_OUTIL.get(outil, persona)
+
+
 def _dump(content) -> list[dict]:
     """Convertit les blocs de réponse en dicts, sans rien modifier (thinking compris)."""
     return [b.model_dump(mode="json", by_alias=True, exclude_none=True) for b in content]
@@ -87,6 +107,8 @@ class Agent:
         self.store = store or JsonStore(settings.data_dir)
         self.cerveau = Cerveau(settings.cerveau_dir, settings.cerveau_push, settings.timezone) \
             if settings.cerveau_dir else None
+        self.cles = Cles(settings.data_dir)
+        self.cles.generer_auto()  # sujet ntfy : rien à faire pour le propriétaire
 
     def options(self) -> dict:
         """Réglages modifiables depuis le tableau de bord (sinon valeurs du .env)."""
@@ -98,10 +120,20 @@ class Agent:
             "fallbacks": self.settings.fallbacks,
             "session_ttl_hours": self.settings.session_ttl_hours,
             "timezone": self.settings.timezone,
+            "beacon_actif": saved.get("beacon_actif", True),
+            "beacon_heure": saved.get("beacon_heure", "08:00"),
         }
 
-    def set_options(self, effort: str | None = None, enable_web: bool | None = None) -> dict:
+    def set_options(self, effort: str | None = None, enable_web: bool | None = None,
+                    beacon_actif: bool | None = None, beacon_heure: str | None = None) -> dict:
         changes: dict = {}
+        if beacon_actif is not None:
+            changes["beacon_actif"] = bool(beacon_actif)
+        if beacon_heure is not None:
+            import re
+            if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", beacon_heure):
+                raise ValueError("Heure au format HH:MM, ex. 08:00")
+            changes["beacon_heure"] = beacon_heure
         if effort is not None:
             if effort not in EFFORTS:
                 raise ValueError(f"effort doit être l'un de {EFFORTS}")
@@ -152,6 +184,35 @@ class Agent:
         etat.signaler("claude", True, f"{self.settings.model} · effort {opts['effort']}")
         return response
 
+    def specialiste(self, agent: str, demande: str) -> str:
+        """Un agent du Catalogue répond avec son propre métier et sa recherche web (sous-agent)."""
+        nom, metier = SPECIALISTES[agent]
+        opts = self.options()
+        system = (f"Tu es {nom}, agent de l'écosystème Jarvis : {metier}\n"
+                  "Réponds en français, de façon concrète et vérifiable : chiffres, noms, dates. "
+                  "Cherche sur le web quand l'information doit être récente, et cite tes sources (nom du site). "
+                  "Dis clairement ce qui est incertain. Pas de conseil d'achat ou de vente financier.")
+        tools = SERVER_TOOLS if opts["enable_web"] else []
+        messages: list[dict] = [{"role": "user", "content": demande}]
+        textes: list[str] = []
+        for _ in range(4):  # pause_turn possible pendant une recherche web longue
+            kwargs: dict = dict(model=self.settings.model, max_tokens=8000, system=system, messages=messages,
+                                thinking={"type": "adaptive"}, output_config={"effort": "low"})
+            if tools:
+                kwargs["tools"] = tools
+            if self.settings.fallbacks:
+                kwargs["betas"] = ["server-side-fallback-2026-07-01"]
+                kwargs["fallbacks"] = "default"
+            r = self.client.beta.messages.create(**kwargs)
+            if r.stop_reason == "refusal":
+                return f"{nom} ne peut pas traiter cette demande."
+            if t := _final_text(r.content):
+                textes.append(t)
+            if r.stop_reason != "pause_turn":
+                break
+            messages.append({"role": "assistant", "content": _dump(r.content)})
+        return "\n".join(textes) or f"{nom} n'a rien trouvé."
+
     def ask(self, text: str, session_id: str = "iphone",
             on_event: Callable[[dict], None] | None = None, persona: str = "cortana") -> AgentReply:
         """on_event reçoit chaque étape (outil appelé, recherche web) au fil de l'eau.
@@ -171,7 +232,8 @@ class Agent:
 
         history = self.store.load_session(session_id, self.settings.session_ttl_hours)
         messages = history + [{"role": "user", "content": text}]
-        ctx = ToolContext(self.store, self.settings.timezone, cerveau=self.cerveau)
+        ctx = ToolContext(self.store, self.settings.timezone, cerveau=self.cerveau, cles=self.cles,
+                          specialiste=self.specialiste, lecture_seule=(persona == "caro"))
         texts: list[str] = []
 
         try:
@@ -188,7 +250,7 @@ class Agent:
                     texts.append(t)
                 for block in response.content:
                     if block.type == "server_tool_use":  # recherche / lecture web côté Anthropic
-                        emit({"outil": block.name, "agent": AGENT_PAR_OUTIL.get(block.name, persona),
+                        emit({"outil": block.name, "agent": agent_de(block.name, block.input, persona),
                               "entree": block.input, "erreur": False, "resultat": ""})
 
                 if stop == "pause_turn":  # recherche web longue : on relance pour continuer
@@ -204,7 +266,7 @@ class Agent:
                             content, is_error = run_tool(ctx, block.name, block.input)
                         else:  # garde-fou : Caro ne peut pas appeler un outil qui modifie
                             content, is_error = "Outil non autorisé pour cette voix. Demande à Cortana.", True
-                        emit({"outil": block.name, "agent": AGENT_PAR_OUTIL.get(block.name, persona),
+                        emit({"outil": block.name, "agent": agent_de(block.name, block.input, persona),
                               "entree": block.input, "erreur": is_error, "resultat": content[:300]})
                         results.append({"type": "tool_result", "tool_use_id": block.id,
                                         "content": content, "is_error": is_error})

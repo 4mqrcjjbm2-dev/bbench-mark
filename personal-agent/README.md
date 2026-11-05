@@ -6,13 +6,31 @@
 
 Chaque voix a sa propre conversation. Dans la Blackbox, Jarvis est au centre, Cortana et Caro autour du cœur, et **les 24 agents du [Catalogue](https://claude.ai/artifact/BL29NXrEQgE6bRiAY9vN1y)** en cercle, regroupés et colorés par équipe. Un nœud plein veut dire livré, à moitié plein en test ou partiel, en pointillé à bâtir ; le point néon marque un agent branché pour vrai dans Jarvis. Touche un agent pour voir sa fiche. La liste vit dans `agent/catalogue.py`.
 
-| Branché aujourd'hui | Agent | Outils |
-|---|---|---|
-| Prix et marché crypto | PULSE | `prix_crypto`, `marche_crypto` |
-| Backtests | SOL Paper Trader | `backtest` |
-| Mémoire du Cerveau, liste des agents | NEXUS | `memoire_*`, `agents_catalogue` |
-| Recherche web | PRISM | `web_search`, `web_fetch` |
-| Tâches, notes, rappels, actions iPhone | Cortana elle-même | `tache_*`, `note_*`, `date_heure`, `action_iphone` |
+**19 agents sur 24 sont branchés**, chacun sur son chemin le plus fiable : une source gratuite sans clé d'abord, une source de secours si possible, des réessais automatiques et un cache court. Si une source tombe, la réponse donne ce qui marche au lieu d'échouer.
+
+| Agent | Ce qu'il fait dans Jarvis | Source | Clé ? |
+|---|---|---|---|
+| PULSE | Prix, marché, tendances, plus fortes hausses et baisses | CoinGecko (secours : Coinbase) | Non |
+| LEDGER | S&P 500, Nasdaq, Dow Jones, USD→CAD, USD→EUR | Stooq, Frankfurter | Non |
+| VAULT | Or, argent, pétrole WTI, gaz naturel | Stooq | Non |
+| Sniper Pro | Lecture technique MM20/50, RSI, MACD, Bollinger, score sur 5 | CoinGecko | Non |
+| SOL Paper Trader | Backtests (simulation) | CoinGecko | Non |
+| ORCA | Portefeuilles publics : Bitcoin / Ethereum | mempool.space / Etherscan | Non / **oui (gratuite)** |
+| BEACON | Notifications iPhone et rapport du matin automatique | ntfy | **Générée toute seule** |
+| NEXUS | Mémoire du Cerveau, liste des agents | dépôt `cerveaux-` | Non |
+| PRISM | Recherche web, décomposer une info | recherche web Claude | Non |
+| ECHO, SILK, AURA, FESTA, FORGE, NEON, RIG, AEGIS, Agent Pub | Chacun répond comme un sous-agent avec son métier et sa propre recherche web | Claude + web | Non |
+| VOX | Parler québécois compris par les deux voix | intégré | Non |
+| Cortana | Tâches, notes, rappels, actions iPhone | local | Non |
+
+Encore à bâtir : JARVIS iPhone et Terminal JARVIS (produits séparés), Swarm (aucun trading autonome sans tests), TAO Staking, Gardiens.
+
+**Clés API.** Je ne crée pas de compte et je ne récupère pas de clé à ta place, c'est la règle de sécurité. En revanche :
+- ce qui n'a pas besoin de compte est généré automatiquement (ton sujet de notifications ntfy) ;
+- une clé se colle dans la page (**Connexions → Clés API**) et s'active tout de suite, sans redémarrage ;
+- elle est rangée dans `data/cles.json` (permissions 600) et ne s'affiche jamais en entier.
+
+**Notifications iPhone (BEACON).** Installe l'app gratuite **ntfy**, touche **+** et abonne-toi au sujet affiché dans Connexions → Clés API. Le rapport du matin part tout seul à l'heure choisie dans Options (08:00 par défaut). Le bouton « Envoyer un rapport maintenant » permet de tester.
 
 Jarvis réunit aussi sur la même page : **la Blackbox** (la salle animée où l'on voit les agents travailler, avec le tableau des tâches en cours), **le Cerveau** (ta mémoire `cerveaux-`), **les backtests**, tes tâches et notes, et **toutes les connexions**.
 

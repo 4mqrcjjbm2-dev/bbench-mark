@@ -9,7 +9,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from . import etat
+from . import etat, net
+from .agents_outils import OUTILS_AGENTS, OutilErreur, prix_secours_coinbase
 from .backtest import STRATEGIES, BacktestErreur, Parametres, executer, recuperer_prix
 from .cerveau import Cerveau, CerveauErreur
 from .storage import JsonStore
@@ -25,11 +26,14 @@ class ToolContext:
     """État partagé pendant une requête : stockage + action à exécuter sur l'iPhone."""
 
     def __init__(self, store: JsonStore, timezone: str, http: httpx.Client | None = None,
-                 cerveau: Cerveau | None = None) -> None:
+                 cerveau: Cerveau | None = None, cles=None, specialiste=None, lecture_seule: bool = False) -> None:
         self.store = store
         self.timezone = timezone
-        self.http = http or httpx.Client(timeout=20)
+        self.http = http or httpx.Client(timeout=15, headers={"User-Agent": "Jarvis-personnel/1.0"})
         self.cerveau = cerveau
+        self.cles = cles                  # coffre à clés (cles.Cles)
+        self.specialiste = specialiste    # callable(agent, demande) -> str, fourni par l'Agent
+        self.lecture_seule = lecture_seule
         self.iphone_action: dict | None = None
 
 
@@ -47,28 +51,22 @@ def prix_crypto(ctx: ToolContext, args: dict) -> str:
     if isinstance(ids, str):
         ids = [ids]
     devise = (args.get("devise") or "eur").lower()
-    r = ctx.http.get(
-        f"{COINGECKO}/simple/price",
-        params={
-            "ids": ",".join(i.strip().lower() for i in ids),
-            "vs_currencies": devise,
-            "include_24hr_change": "true",
-            "include_market_cap": "true",
-        },
-    )
-    r.raise_for_status()
-    etat.signaler("coingecko", True, "Prix récupérés")
-    data = r.json()
+    ids = [i.strip().lower() for i in ids]
+    try:
+        data = net.get_json(ctx.http, f"{COINGECKO}/simple/price", service="coingecko", ttl=30, params={
+            "ids": ",".join(ids), "vs_currencies": devise,
+            "include_24hr_change": "true", "include_market_cap": "true"})
+    except net.ServiceErreur:
+        data = prix_secours_coinbase(ctx.http, ids, devise)  # CoinGecko tombé : Coinbase en secours
+        if not data:
+            raise
     if not data:
         raise ToolError("Aucune crypto trouvée. Utilise les identifiants CoinGecko (ex: bitcoin, ethereum, solana).")
     return json.dumps(data, ensure_ascii=False)
 
 
 def marche_crypto(ctx: ToolContext, args: dict) -> str:
-    r = ctx.http.get(f"{COINGECKO}/global")
-    r.raise_for_status()
-    etat.signaler("coingecko", True, "Marché récupéré")
-    d = r.json()["data"]
+    d = net.get_json(ctx.http, f"{COINGECKO}/global", service="coingecko", ttl=120)["data"]
     resume = {
         "capitalisation_totale_usd": d["total_market_cap"].get("usd"),
         "volume_24h_usd": d["total_volume"].get("usd"),
@@ -414,6 +412,7 @@ TOOLS_CERVEAU: list[tuple[dict, Callable[[ToolContext, dict], str]]] = [
     ),
 ]
 
+TOOLS += OUTILS_AGENTS
 TOOL_SCHEMAS = [schema for schema, _ in TOOLS]
 TOOL_SCHEMAS_CERVEAU = [schema for schema, _ in TOOLS_CERVEAU]
 HANDLERS = {schema["name"]: fn for schema, fn in TOOLS + TOOLS_CERVEAU}
@@ -431,7 +430,7 @@ def run_tool(ctx: ToolContext, name: str, args: dict) -> tuple[str, bool]:
         return f"Outil inconnu : {name}", True
     try:
         return fn(ctx, args or {}), False
-    except ToolError as e:
+    except (ToolError, OutilErreur, net.ServiceErreur) as e:
         return str(e), True
     except httpx.HTTPError as e:
         if "coingecko" in str(getattr(getattr(e, "request", None), "url", "")):
@@ -450,6 +449,31 @@ CAPACITES = [
      "description": "Capitalisation totale, volume, dominance BTC/ETH.",
      "outils": ["marche_crypto"],
      "exemples": ["Comment va le marché crypto aujourd'hui ?", "Quelle est la dominance du bitcoin ?"]},
+    {"categorie": "Crypto", "titre": "Tendances (PULSE)",
+     "description": "Cryptos les plus recherchées, plus fortes hausses et baisses du top 100.",
+     "outils": ["tendances_crypto"],
+     "exemples": ["Quelles cryptos montent le plus aujourd'hui ?"]},
+    {"categorie": "Trading", "titre": "Lecture technique (Sniper Pro)",
+     "description": "MM20/50, RSI, MACD, Bollinger et score sur 5. Description, jamais un ordre.",
+     "outils": ["analyse_technique"],
+     "exemples": ["Fais la lecture technique de Solana"]},
+    {"categorie": "Marchés", "titre": "Bourses, devises, matières (LEDGER, VAULT)",
+     "description": "S&P 500, Nasdaq, Dow Jones, dollar canadien, or, argent, pétrole, gaz.",
+     "outils": ["marches_financiers", "matieres_premieres"],
+     "exemples": ["Comment vont les bourses et l'or ?", "Combien vaut le pétrole ?"]},
+    {"categorie": "Crypto", "titre": "Portefeuilles publics (ORCA)",
+     "description": "Solde et dernières transactions d'une adresse Bitcoin (sans clé) ou Ethereum (clé Etherscan).",
+     "outils": ["portefeuille_public"],
+     "exemples": ["Regarde l'adresse bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"]},
+    {"categorie": "iPhone", "titre": "Rapport et notifications (BEACON)",
+     "description": "Rapport du moment ou du matin, et notifications sur l'iPhone via l'app ntfy.",
+     "outils": ["rapport_du_jour", "notifier"],
+     "exemples": ["Envoie-moi le rapport du jour sur mon iPhone"]},
+    {"categorie": "Spécialistes", "titre": "ECHO, SILK, AURA, FESTA, FORGE, NEON, RIG, AEGIS, Agent Pub",
+     "description": "Chacun cherche sur le web dans son domaine et te répond concrètement.",
+     "outils": ["consulter_specialiste"],
+     "exemples": ["Qu'est-ce qui monte sur TikTok cette semaine ?", "Quoi préparer pour vendre à Noël ?",
+                  "Optimise mon PC gaming", "Écris une annonce pour mon linge de travail"]},
     {"categorie": "Organisation", "titre": "Tâches",
      "description": "Ajouter, lister et terminer des tâches, avec échéance facultative.",
      "outils": ["tache_ajouter", "taches_lister", "tache_terminer"],

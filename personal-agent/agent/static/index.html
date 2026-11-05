@@ -100,6 +100,14 @@ button.agent { text-align: left; width: 100%; color: inherit; }
 .st-pill.st-livre, .agent .st-pill.st-livre { color: var(--turq); }
 .st-pill.st-test, .st-pill.st-partiel, .agent .st-pill.st-test, .agent .st-pill.st-partiel { color: var(--jaune); }
 .st-pill.st-a_batir, .agent .st-pill.st-a_batir { color: var(--muted); }
+.cle-b, .agent .cle-b { font: 700 9px var(--f-mono); color: var(--bg); background: var(--orange); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.cle { padding: 12px 0; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+.cle:first-of-type { border-top: 0; padding-top: 0; }
+.cle .ligne1 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cle .ligne1 b { flex: 1; font-size: 14px; }
+.cle .topic { font: 600 15px var(--f-mono); color: var(--turq); overflow-wrap: anywhere; background: rgba(4,7,13,.6); border: 1px dashed var(--line); border-radius: 10px; padding: 8px 10px; user-select: all; }
+.cle .rang { display: flex; gap: 8px; flex-wrap: wrap; }
+.cle a { color: var(--turq); font-size: 13px; }
 .live, .agent .live { font: 700 9px var(--f-mono); color: var(--bg); background: var(--neon); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
 .agent .dot.a_batir { background: transparent !important; border: 1.5px dashed var(--c); }
 .agent .dot.test, .agent .dot.partiel { background: linear-gradient(90deg, var(--c) 50%, transparent 50%) !important; border: 1.5px solid var(--c); }
@@ -122,7 +130,7 @@ button.agent { text-align: left; width: 100%; color: inherit; }
 .agent .n { margin-left: auto; font: 600 12px var(--f-mono); color: var(--muted); }
 
 .ordre { display: flex; gap: 8px; margin-top: 12px; }
-input[type=text], input[type=password], input[type=number], select {
+input[type=text], input[type=password], input[type=number], input[type=time], select {
   background: rgba(11,18,32,.8); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; width: 100%;
   outline: none; font-size: 16px; min-width: 0; }
 input:focus, select:focus { border-color: var(--turq); box-shadow: 0 0 0 3px rgba(28,230,215,.12); }
@@ -316,7 +324,12 @@ svg.courbe { width: 100%; height: 120px; display: block; }
     <!-- CONNEXIONS -->
     <section id="connexions">
       <div class="titre"><h2>Connexions</h2><span class="sous">tout ce qui est branché</span></div>
-      <div class="hud" id="liste-cx"></div>
+      <div class="grid g2">
+        <div class="hud" id="liste-cx"></div>
+        <div class="hud" style="--acc:var(--orange)"><h3>Clés API</h3>
+          <p class="small muted" style="margin:0 0 10px">Colle une clé ici : l'agent s'active tout de suite, sans redémarrer. Elle reste sur ton serveur et ne s'affiche jamais en entier.</p>
+          <div id="liste-cles"></div></div>
+      </div>
     </section>
 
     <!-- CAPACITÉS -->
@@ -335,6 +348,12 @@ svg.courbe { width: 100%; height: 120px; display: block; }
           <div class="cx" style="margin-top:10px">
             <div class="grow"><b>Recherche web</b><div class="small muted">Actualités et lecture de pages (facturé en plus).</div></div>
             <label class="switch"><input type="checkbox" id="web"><span></span></label></div>
+        </div>
+        <div class="hud" style="--acc:var(--neon)"><h3>BEACON · rapport du matin</h3>
+          <div class="cx"><div class="grow"><b>Rapport quotidien sur l'iPhone</b><div class="small muted">Crypto, tendances, bourse, or, pétrole et tes tâches, en notification.</div></div>
+            <label class="switch"><input type="checkbox" id="beacon-actif"><span></span></label></div>
+          <div class="cx"><div class="grow"><b>Heure d'envoi</b></div><input type="time" id="beacon-heure" style="width:auto"></div>
+          <button class="btn ghost large" id="beacon-test" type="button">Envoyer un rapport maintenant</button>
         </div>
         <div class="hud"><h3>Serveur</h3><div id="config"></div>
           <div class="grid" style="margin-top:12px">
@@ -584,8 +603,8 @@ function dessiner(t) {
     if (p.persona || p.statut === "livre") { ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.55, 0, Math.PI * 2); ctx.fill(); }
     else if (p.statut === "test" || p.statut === "partiel") { ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.55, Math.PI / 2, Math.PI * 1.5); ctx.fill(); }
     // branché dans Jarvis : petit point néon qui respire
-    if (!p.persona && p.outils && p.outils.length) {
-      ctx.fillStyle = "#c6ff4d"; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(s * 2 + p.x);
+    if (!p.persona && p.branche) {
+      ctx.fillStyle = p.cle_manquante ? "#ff9f43" : "#c6ff4d"; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(s * 2 + p.x);
       ctx.beginPath(); ctx.arc(p.x + r * 0.75, p.y - r * 0.75, 2.4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
     }
     // étiquette
@@ -626,8 +645,10 @@ function rendreFiche() {
       h("span", { class: "small muted" }, `${f.num ? "n° " + f.num + " · " : ""}${f.groupe_nom}`)),
     h("p", {}, h("b", {}, f.role + ". "), f.fait),
     h("p", { class: "small muted" }, "Statut au Catalogue : " + f.statut_txt + "."),
-    h("p", { class: "small", style: { color: f.outils.length ? "var(--neon)" : "var(--muted)" } },
-      f.outils.length ? "Branché dans Jarvis : " + f.dans_jarvis : "Pas encore branché dans Jarvis."),
+    h("p", { class: "small", style: { color: f.branche ? "var(--neon)" : "var(--muted)" } },
+      f.branche ? "Branché dans Jarvis : " + f.dans_jarvis : "Pas encore branché dans Jarvis."),
+    f.cle_manquante ? h("p", { class: "small", style: { color: "var(--orange)" } },
+      "Une clé gratuite débloque tout : ", h("a", { href: "#connexions", style: { color: "var(--orange)" } }, "la coller dans Clés API"), ".") : null,
     f.outils.length ? h("p", { class: "small mono muted" }, f.outils.join(" · ")) : null);
 }
 function rendrePersona() {
@@ -648,7 +669,7 @@ function rendreRoster() {
         class: "agent" + (salle.actifs.has(a.id) ? " actif" : "") + (selection === a.id ? " sel" : ""),
         style: { "--c": a.couleur }, onclick: () => choisir(a.id), "aria-label": `${a.nom}, ${STATUT_COURT[a.statut]}` },
         h("span", { class: "dot " + a.statut }),
-        h("div", { style: { minWidth: 0, flex: 1 } }, h("b", {}, a.court, a.outils.length ? h("span", { class: "live" }, "LIVE") : null),
+        h("div", { style: { minWidth: 0, flex: 1 } }, h("b", {}, a.court, a.branche ? h("span", { class: "live" }, "LIVE") : null, a.cle_manquante ? h("span", { class: "cle-b" }, "CLÉ") : null),
           h("br"), h("span", { class: "st-pill st-" + a.statut }, STATUT_COURT[a.statut])),
         compte[a.id] ? h("span", { class: "n", title: "actions aujourd'hui" }, compte[a.id]) : null))))));
 }
@@ -803,8 +824,41 @@ function rendreConnexions() {
   }));
 }
 
+function rendreCles(force) {
+  // Ne jamais effacer une clé en cours de saisie : pas de redessin tant qu'un champ est utilisé.
+  const box = $("#liste-cles");
+  if (!force && [...box.querySelectorAll("input")].some((i) => i.value || i === document.activeElement)) return;
+  box.replaceChildren(...state.cles.map((k) => {
+    const ag = agentsParId[k.agent];
+    const tete = h("div", { class: "ligne1" }, h("span", { class: "dot " + (k.configuree ? "ok" : "off") }),
+      h("b", {}, k.titre), ag ? h("span", { class: "small", style: { color: ag.couleur } }, ag.court) : null);
+    if (k.nom === "NTFY_TOPIC") {
+      return h("div", { class: "cle" }, tete, h("div", { class: "small muted" }, k.aide),
+        h("div", { class: "topic" }, k.apercu || "…"),
+        h("div", { class: "rang" },
+          h("button", { class: "btn ghost", type: "button", onclick: () => copier(k.apercu) }, "Copier le sujet"),
+          h("a", { href: "https://ntfy.sh/" + encodeURIComponent(k.apercu), target: "_blank", rel: "noopener" }, "Voir sur ntfy.sh ↗"),
+          h("a", { href: k.lien, target: "_blank", rel: "noopener" }, "App ntfy ↗")));
+    }
+    const champ = h("input", { type: "password", placeholder: k.configuree ? "Remplacer la clé…" : "Colle la clé ici", autocomplete: "off", "aria-label": k.titre });
+    return h("div", { class: "cle" }, tete,
+      h("div", { class: "small muted" }, k.configuree ? `Configurée (${k.apercu})${k.source === "env" ? " dans .env" : ""}.` : k.aide),
+      h("div", { class: "rang" }, h("a", { href: k.lien, target: "_blank", rel: "noopener" }, "Obtenir la clé gratuite ↗")),
+      k.source === "env" ? null : h("form", { class: "ajout", onsubmit: async (e) => {
+        e.preventDefault();
+        try {
+          state.cles = await api("/api/cles", { method: "POST", body: { nom: k.nom, valeur: champ.value } });
+          champ.value = ""; champ.blur(); rendreCles(true); toast("Clé enregistrée : " + k.titre + " est actif");
+        } catch (err) { toast(err.message); }
+        rafraichir();
+      } }, champ, h("button", { class: "btn" }, "OK")),
+      k.configuree && k.source !== "env" ? h("button", { class: "btn danger", type: "button", onclick: () => modifier("/api/cles/" + k.nom, { method: "DELETE" }) }, "Retirer la clé") : null);
+  }));
+}
+async function copier(t) { try { await navigator.clipboard.writeText(t); toast("Copié"); } catch { toast(t); } }
+
 // ---------- CAPACITÉS ----------
-const ACC_CAT = { "Écosystème": "var(--mauve)", Crypto: "var(--jaune)", Trading: "var(--mauve)", Cerveau: "var(--turq)", Organisation: "var(--neon)", iPhone: "var(--orange)", Recherche: "#4da3ff", Divers: "var(--muted)" };
+const ACC_CAT = { "Écosystème": "var(--mauve)", "Marchés": "#c6ff4d", "Spécialistes": "#ff9f43", Crypto: "var(--jaune)", Trading: "var(--mauve)", Cerveau: "var(--turq)", Organisation: "var(--neon)", iPhone: "var(--orange)", Recherche: "#4da3ff", Divers: "var(--muted)" };
 function rendreCapacites() {
   const box = $("#caps"); if (box.childElementCount) return;
   box.append(...state.capacites.map((c) => h("div", { class: "hud", style: { "--acc": ACC_CAT[c.categorie] || "var(--turq)" } },
@@ -823,6 +877,8 @@ function rendreOptions() {
   $("#effort").replaceChildren(...state.efforts.map((e) => h("button", { type: "button", class: e === o.effort ? "on" : "", onclick: () => option({ effort: e }) }, e)));
   $("#effort-aide").textContent = AIDE[o.effort] || "";
   $("#web").checked = !!o.enable_web;
+  $("#beacon-actif").checked = !!o.beacon_actif;
+  if (document.activeElement !== $("#beacon-heure")) $("#beacon-heure").value = o.beacon_heure;
   const rows = [["Modèle", o.model], ["Secours si refus par erreur", o.fallbacks ? "activé" : "désactivé"],
     ["Mémoire de conversation", o.session_ttl_hours + " h"], ["Fuseau", o.timezone], ["Serveur démarré", ago(state.demarre_depuis)]];
   $("#config").replaceChildren(...rows.map(([k, v]) => h("div", { class: "kv" }, h("span", { class: "muted" }, k), h("b", {}, v))));
@@ -832,8 +888,8 @@ function rendreOptions() {
 const ROADMAP = [
   { t: "Voix Jarvis sur l'ordinateur", n: "moyen", d: "Micro → Jarvis → réponse parlée, directement sur ton Mac/PC, sans passer par Siri.", b: "Ordinateur + micro" },
   { t: "Vérification auto des prédictions", n: "facile", d: "Chaque jour, Jarvis compare ses prédictions au vrai prix et met à jour son score dans le Cerveau.", b: "Rien de plus" },
-  { t: "Solde de mes wallets", n: "facile", d: "Lire le solde et les tokens d'une adresse publique (Etherscan), en lecture seule.", b: "Clé API Etherscan gratuite" },
-  { t: "Alertes de prix", n: "moyen", d: "« Préviens-moi si le BTC passe sous 55 000 € » : surveillance et notification sur l'iPhone.", b: "App ntfy ou Pushover" },
+  { t: "Alertes de prix", n: "moyen", d: "« Préviens-moi si le BTC passe sous 55 000 € » : PULSE surveille, BEACON notifie l'iPhone.", b: "Rien de plus (ntfy déjà prêt)" },
+  { t: "Baleines suivies en continu", n: "moyen", d: "ORCA surveille une liste d'adresses publiques et BEACON t'alerte à chaque gros mouvement.", b: "Clé Etherscan pour Ethereum" },
   { t: "Backtests planifiés", n: "facile", d: "Relancer chaque semaine tes stratégies et signaler celles qui se dégradent.", b: "Rien de plus" },
   { t: "Plus de stratégies", n: "moyen", d: "Bandes de Bollinger, MACD, cassure de range, filtre « panique » de la salle de veille.", b: "Rien de plus" },
   { t: "Terminal Neurolab intégré", n: "moyen", d: "Bougies, volumes, MM et RSI de ton terminal Neurolab directement dans cette page.", b: "Rien de plus" },
@@ -862,7 +918,7 @@ function rendreRoadmap() {
 // ---------- Boucle de rafraîchissement ----------
 function rendre() {
   agentsParId = Object.fromEntries(state.agents.map((a) => [a.id, a]));
-  majSalle(); rendreBlackbox(); rendreCerveau(); rendreBacktests(); rendreTaches(); rendreConnexions(); rendreCapacites(); rendreOptions();
+  majSalle(); rendreBlackbox(); rendreCerveau(); rendreBacktests(); rendreTaches(); rendreConnexions(); rendreCles(); rendreCapacites(); rendreOptions();
 }
 let timer;
 async function rafraichir() {
@@ -913,6 +969,13 @@ $("#bt-form").addEventListener("submit", async (e) => {
   btn.disabled = false; btn.textContent = "Lancer le backtest"; rafraichir();
 });
 $("#web").addEventListener("change", (e) => option({ enable_web: e.target.checked }));
+$("#beacon-actif").addEventListener("change", (e) => option({ beacon_actif: e.target.checked }));
+$("#beacon-heure").addEventListener("change", (e) => option({ beacon_heure: e.target.value }));
+$("#beacon-test").addEventListener("click", async () => {
+  const b = $("#beacon-test"); b.disabled = true; b.textContent = "BEACON envoie…";
+  try { await api("/api/beacon/test", { method: "POST" }); toast("Rapport envoyé sur l'iPhone"); } catch (e) { toast(e.message); }
+  b.disabled = false; b.textContent = "Envoyer un rapport maintenant"; rafraichir();
+});
 $("#reset").addEventListener("click", async () => { try { await api("/reset?session=iphone", { method: "POST" }); toast("Nouvelle conversation"); } catch (e) { toast(e.message); } });
 $("#logout").addEventListener("click", deconnexion);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && token) rafraichir(); });

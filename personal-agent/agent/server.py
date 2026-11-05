@@ -6,13 +6,16 @@ Tableau de bord : ouvre http://<serveur>:8787/ dans Safari.
 
 from __future__ import annotations
 
+import datetime as dt
 import hmac
 import logging
 import os
 import threading
 import time
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import anthropic
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -28,6 +31,8 @@ from .core import EFFORTS, Agent
 from typing import Literal
 
 from .catalogue import CARO_CATALOGUE, GROUPES, PERSONAS, agents_pour_page
+from .agents_outils import envoyer_notification, rapport_texte
+from .cles import CLES
 from .tools import CAPACITES, ToolContext, ToolError, lancer_backtest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -40,7 +45,50 @@ if len(settings.agent_token) < 24:
     )
 
 STATIC = Path(__file__).parent / "static"
-app = FastAPI(title="Agent personnel", docs_url=None, redoc_url=None)
+log = logging.getLogger("jarvis")
+
+
+def envoyer_rapport(agent) -> str:
+    """BEACON : assemble le rapport et l'envoie sur l'iPhone (ntfy)."""
+    ctx = ToolContext(agent.store, settings.timezone, cles=agent.cles)
+    try:
+        texte = rapport_texte(ctx)
+        envoyer_notification(ctx.http, agent.cles.get("NTFY_TOPIC"), "Rapport Jarvis", texte)
+        return texte
+    finally:
+        ctx.http.close()
+
+
+def _beacon_boucle(arret: threading.Event) -> None:
+    """Envoie le rapport du matin une fois par jour, à l'heure choisie (rattrapage jusqu'à 2 h après)."""
+    while not arret.wait(30):
+        try:
+            agent = get_agent()
+            o = agent.options()
+            if not o["beacon_actif"]:
+                continue
+            maintenant = dt.datetime.now(ZoneInfo(settings.timezone))
+            h, m = map(int, o["beacon_heure"].split(":"))
+            prevu = maintenant.replace(hour=h, minute=m, second=0, microsecond=0)
+            deja = agent.store.get_options().get("beacon_dernier")
+            if prevu <= maintenant < prevu + dt.timedelta(hours=2) and deja != maintenant.date().isoformat():
+                agent.store.set_options(beacon_dernier=maintenant.date().isoformat())
+                envoyer_rapport(agent)
+                log.info("BEACON : rapport du matin envoyé")
+        except Exception:  # noqa: BLE001 - la boucle ne doit jamais mourir
+            log.exception("BEACON")
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    arret = threading.Event()
+    if os.environ.get("JARVIS_SANS_PLANIFICATEUR") != "1":
+        threading.Thread(target=_beacon_boucle, args=(arret,), daemon=True).start()
+    yield
+    arret.set()
+
+
+app = FastAPI(title="Jarvis", docs_url=None, redoc_url=None, lifespan=lifespan)
 _agent: Agent | None = None
 _session_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 _started = time.time()
@@ -102,6 +150,13 @@ class BacktestIn(BaseModel):
 class OptionsIn(BaseModel):
     effort: str | None = None
     enable_web: bool | None = None
+    beacon_actif: bool | None = None
+    beacon_heure: str | None = None
+
+
+class CleIn(BaseModel):
+    nom: str
+    valeur: str = Field(min_length=4, max_length=200)
 
 
 # --- Pages ------------------------------------------------------------------------
@@ -236,6 +291,19 @@ def _connexions(agent: Agent, activite: list[dict]) -> list[dict]:
                         f"{cerveau.racine.name} · {'push auto' if cerveau.pousser else 'commit local'}"
                         if cerveau.disponible else f"Dossier introuvable : {cerveau.racine}")),
          "dernier_ok": e.get("memoire", {}).get("dernier_ok")},
+        *[{"id": sid, "nom": nom, "statut": statut(sid), "detail": e.get(sid, {}).get("detail") or attente,
+           "dernier_ok": e.get(sid, {}).get("dernier_ok")}
+          for sid, nom, attente in (
+              ("coinbase", "Coinbase (prix de secours)", "Utilisé seulement si CoinGecko tombe"),
+              ("stooq", "Stooq (bourses, or, pétrole) · LEDGER, VAULT", "Pas encore utilisé"),
+              ("frankfurter", "Frankfurter (devises) · LEDGER", "Pas encore utilisé"),
+              ("mempool", "mempool.space (Bitcoin) · ORCA", "Pas encore utilisé"),
+              ("ntfy", "ntfy (notifications iPhone) · BEACON", "Prêt : abonne-toi au sujet dans l'app ntfy"))],
+        {"id": "etherscan", "nom": "Etherscan (Ethereum) · ORCA",
+         "statut": statut("etherscan", "ok") if agent.cles.get("ETHERSCAN_API_KEY") else "off",
+         "detail": e.get("etherscan", {}).get("detail") or (
+             "Clé configurée" if agent.cles.get("ETHERSCAN_API_KEY") else "Clé à coller dans Clés API (gratuite)"),
+         "dernier_ok": e.get("etherscan", {}).get("dernier_ok")},
         {"id": "iphone", "nom": "iPhone (Raccourci Siri)", "statut": "ok" if dernier_iphone else "inconnu",
          "detail": "Dernière demande reçue" if dernier_iphone else "Aucune demande reçue de l'iPhone pour l'instant",
          "dernier_ok": dernier_iphone},
@@ -250,7 +318,8 @@ def state() -> dict:
     cerveau = _en_cache("cerveau", 10, lambda: agent.cerveau.resume() if agent.cerveau else {"disponible": False})
     return {
         "activite": activite,
-        "agents": agents_pour_page(),
+        "agents": agents_pour_page(agent.cles),
+        "cles": agent.cles.statut(),
         "personas": list(PERSONAS.values()),
         "groupes": GROUPES,
         "caro_catalogue": CARO_CATALOGUE,
@@ -329,6 +398,37 @@ def note_supprimer(item_id: str) -> dict:
 @app.post("/api/options", dependencies=auth)
 def options(body: OptionsIn) -> dict:
     try:
-        return get_agent().set_options(effort=body.effort, enable_web=body.enable_web)
+        return get_agent().set_options(**body.model_dump(exclude_none=True))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+
+# --- Coffre à clés et BEACON ----------------------------------------------------------
+
+@app.post("/api/cles", dependencies=auth)
+def cle_definir(body: CleIn) -> list[dict]:
+    if body.nom not in CLES:
+        raise HTTPException(400, "Clé inconnue")
+    try:
+        get_agent().cles.definir(body.nom, body.valeur)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return get_agent().cles.statut()
+
+
+@app.delete("/api/cles/{nom}", dependencies=auth)
+def cle_supprimer(nom: str) -> list[dict]:
+    if nom not in CLES:
+        raise HTTPException(404, "Clé inconnue")
+    agent = get_agent()
+    agent.cles.supprimer(nom)
+    agent.cles.generer_auto()  # un sujet ntfy supprimé est aussitôt recréé (nouveau sujet)
+    return agent.cles.statut()
+
+
+@app.post("/api/beacon/test", dependencies=auth)
+def beacon_test() -> dict:
+    try:
+        return {"ok": True, "texte": envoyer_rapport(get_agent())}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Envoi impossible : {e}") from e

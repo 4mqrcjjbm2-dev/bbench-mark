@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from . import net
+
 COINGECKO = "https://api.coingecko.com/api/v3"
 
 STRATEGIES = {
@@ -40,12 +42,14 @@ class BacktestErreur(Exception):
 
 
 def recuperer_prix(http: httpx.Client, actif: str, devise: str, jours: int) -> list[tuple[float, float]]:
-    r = http.get(f"{COINGECKO}/coins/{actif}/market_chart",
-                 params={"vs_currency": devise, "days": jours, "interval": "daily"})
-    if r.status_code == 404:
-        raise BacktestErreur(f"Actif inconnu sur CoinGecko : {actif}")
-    r.raise_for_status()
-    prix = [(ts / 1000, p) for ts, p in r.json().get("prices", []) if p]
+    try:
+        data = net.get_json(http, f"{COINGECKO}/coins/{actif}/market_chart", service="coingecko", ttl=600,
+                            params={"vs_currency": devise, "days": jours, "interval": "daily"})
+    except net.ServiceErreur as e:
+        if "404" in str(e):
+            raise BacktestErreur(f"Actif inconnu sur CoinGecko : {actif}. Utilise son identifiant (ex: bitcoin).") from e
+        raise BacktestErreur(str(e)) from e
+    prix = [(ts / 1000, p) for ts, p in data.get("prices", []) if p]
     # CoinGecko ajoute parfois le point « maintenant » en plus du dernier jour : on garde un point par jour.
     par_jour: dict[str, tuple[float, float]] = {}
     for ts, p in prix:
