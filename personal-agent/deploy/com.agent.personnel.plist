@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Démarrage automatique sur Mac. Remplace CHEMIN par le chemin absolu du dossier personal-agent,
+     copie ce fichier dans ~/Library/LaunchAgents/ puis :
+     launchctl load ~/Library/LaunchAgents/com.agent.personnel.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.agent.personnel</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/bash</string><string>CHEMIN/deploy/run.sh</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/agent-personnel.log</string>
+  <key>StandardErrorPath</key><string>/tmp/agent-personnel.log</string>
+</dict>
+</plist>
