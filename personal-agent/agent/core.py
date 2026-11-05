@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Callable
 
 import anthropic
 
@@ -38,6 +39,10 @@ class AgentReply:
     text: str
     iphone_action: dict | None
     stop_reason: str
+    events: list[dict] = field(default_factory=list)
+
+
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 
 def _dump(content) -> list[dict]:
@@ -55,17 +60,40 @@ class Agent:
         self.settings = settings
         self.client = client or anthropic.Anthropic()
         self.store = store or JsonStore(settings.data_dir)
-        self.tools = TOOL_SCHEMAS + (SERVER_TOOLS if settings.enable_web else [])
+
+    def options(self) -> dict:
+        """Réglages modifiables depuis le tableau de bord (sinon valeurs du .env)."""
+        saved = self.store.get_options()
+        return {
+            "model": self.settings.model,
+            "effort": saved.get("effort", self.settings.effort),
+            "enable_web": saved.get("enable_web", self.settings.enable_web),
+            "fallbacks": self.settings.fallbacks,
+            "session_ttl_hours": self.settings.session_ttl_hours,
+            "timezone": self.settings.timezone,
+        }
+
+    def set_options(self, effort: str | None = None, enable_web: bool | None = None) -> dict:
+        changes: dict = {}
+        if effort is not None:
+            if effort not in EFFORTS:
+                raise ValueError(f"effort doit être l'un de {EFFORTS}")
+            changes["effort"] = effort
+        if enable_web is not None:
+            changes["enable_web"] = bool(enable_web)
+        self.store.set_options(**changes)
+        return self.options()
 
     def _create(self, messages: list[dict]):
+        opts = self.options()
         kwargs: dict = dict(
             model=self.settings.model,
             max_tokens=16000,
             system=SYSTEM_PROMPT,
-            tools=self.tools,
+            tools=TOOL_SCHEMAS + (SERVER_TOOLS if opts["enable_web"] else []),
             messages=messages,
             thinking={"type": "adaptive"},
-            output_config={"effort": self.settings.effort},
+            output_config={"effort": opts["effort"]},
             cache_control={"type": "ephemeral"},
         )
         if self.settings.fallbacks:
@@ -74,7 +102,16 @@ class Agent:
             kwargs["fallbacks"] = "default"
         return self.client.beta.messages.create(**kwargs)
 
-    def ask(self, text: str, session_id: str = "iphone") -> AgentReply:
+    def ask(self, text: str, session_id: str = "iphone",
+            on_event: Callable[[dict], None] | None = None) -> AgentReply:
+        """on_event reçoit chaque étape (outil appelé, recherche web) au fil de l'eau."""
+        events: list[dict] = []
+
+        def emit(event: dict) -> None:
+            events.append(event)
+            if on_event:
+                on_event(event)
+
         history = self.store.load_session(session_id, self.settings.session_ttl_hours)
         messages = history + [{"role": "user", "content": text}]
         ctx = ToolContext(self.store, self.settings.timezone)
@@ -87,11 +124,14 @@ class Agent:
 
                 if stop == "refusal":
                     # On ne garde pas ce tour : la conversation reste dans son état précédent.
-                    return AgentReply("Désolé, je ne peux pas traiter cette demande.", None, stop)
+                    return AgentReply("Désolé, je ne peux pas traiter cette demande.", None, stop, events)
 
                 messages.append({"role": "assistant", "content": _dump(response.content)})
                 if t := _final_text(response.content):
                     texts.append(t)
+                for block in response.content:
+                    if block.type == "server_tool_use":  # recherche / lecture web côté Anthropic
+                        emit({"outil": block.name, "entree": block.input, "erreur": False, "resultat": ""})
 
                 if stop == "pause_turn":  # recherche web longue : on relance pour continuer
                     continue
@@ -103,6 +143,8 @@ class Agent:
                     if block.type == "tool_use":
                         log.info("outil %s %s", block.name, block.input)
                         content, is_error = run_tool(ctx, block.name, block.input)
+                        emit({"outil": block.name, "entree": block.input, "erreur": is_error,
+                              "resultat": content[:300]})
                         results.append({"type": "tool_result", "tool_use_id": block.id,
                                         "content": content, "is_error": is_error})
                 messages.append({"role": "user", "content": results})
@@ -119,7 +161,7 @@ class Agent:
         reply = texts[-1] if texts else "C'est fait."
         if stop == "max_tokens":
             reply += " (réponse tronquée)"
-        return AgentReply(reply, ctx.iphone_action, stop)
+        return AgentReply(reply, ctx.iphone_action, stop, events)
 
     def reset(self, session_id: str = "iphone") -> None:
         self.store.reset_session(session_id)

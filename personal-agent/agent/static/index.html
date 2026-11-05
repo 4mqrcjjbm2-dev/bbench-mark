@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Agent">
+<title>Mon Agent</title>
+<style>
+:root {
+  --bg: #f4f4f1; --surface: #ffffff; --surface-2: #ecebe6; --line: #dddcd5;
+  --text: #1b1b19; --muted: #6b6a63; --accent: #2f5bd3; --accent-ink: #ffffff;
+  --ok: #1f8a4c; --warn: #b7791f; --err: #c0392b; --run: #2f5bd3;
+  --radius: 14px; --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111110; --surface: #1c1c1a; --surface-2: #262623; --line: #33332f;
+    --text: #ededea; --muted: #9b9a92; --accent: #7b9cff; --accent-ink: #0d0d0c;
+    --ok: #4cc27f; --warn: #e0a54a; --err: #ef6b5b; --run: #7b9cff;
+    --shadow: none; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111110; --surface: #1c1c1a; --surface-2: #262623; --line: #33332f;
+  --text: #ededea; --muted: #9b9a92; --accent: #7b9cff; --accent-ink: #0d0d0c;
+  --ok: #4cc27f; --warn: #e0a54a; --err: #ef6b5b; --run: #7b9cff;
+  --shadow: none; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%;
+  padding-bottom: calc(76px + env(safe-area-inset-bottom));
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+
+/* En-tête */
+header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(12px); -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  padding-top: env(safe-area-inset-top); border-bottom: 1px solid var(--line); }
+header .wrap { display: flex; align-items: center; gap: 10px; height: 54px; }
+header h1 { font-size: 17px; margin: 0; font-weight: 650; flex: 1; letter-spacing: -.01em; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.ok { background: var(--ok); } .dot.err { background: var(--err); }
+.dot.run { background: var(--run); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+  margin: 24px 0 8px; font-weight: 600; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 14px; }
+.stack > * + * { margin-top: 10px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.row { display: flex; align-items: center; gap: 10px; }
+.grow { flex: 1; min-width: 0; }
+.empty { text-align: center; padding: 28px 14px; color: var(--muted); }
+
+/* Stats */
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.stat span { font-size: 12px; color: var(--muted); }
+
+/* Zone de saisie */
+.composer { display: flex; gap: 8px; margin-top: 16px; }
+.composer input { flex: 1; min-width: 0; }
+input[type=text], input[type=password], input[type=datetime-local], textarea {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px;
+  width: 100%; outline: none; font-size: 16px; }
+input:focus, textarea:focus { border-color: var(--accent); }
+.btn { border: 0; border-radius: 12px; padding: 11px 16px; background: var(--accent); color: var(--accent-ink);
+  font-weight: 600; white-space: nowrap; }
+.btn:disabled { opacity: .5; }
+.btn.ghost { background: var(--surface-2); color: var(--text); }
+.btn.danger { background: transparent; color: var(--err); border: 1px solid var(--line); }
+.icon-btn { border: 0; background: transparent; color: var(--muted); padding: 6px; border-radius: 8px; font-size: 18px; line-height: 1; }
+
+/* Activité */
+.act-head { display: flex; gap: 8px; align-items: flex-start; }
+.act-q { font-weight: 600; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.badge { font-size: 11.5px; font-weight: 600; border-radius: 99px; padding: 2px 8px; white-space: nowrap;
+  background: var(--surface-2); color: var(--muted); }
+.badge.termine { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.badge.en_cours { color: var(--run); background: color-mix(in srgb, var(--run) 14%, transparent); }
+.badge.erreur, .badge.refus, .badge.interrompu { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
+.meta { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.step { font-size: 12.5px; background: var(--surface-2); border-radius: 8px; padding: 3px 8px; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step.err { color: var(--err); }
+.reply { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.action { margin-top: 8px; font-size: 13px; color: var(--accent); }
+
+/* Tâches / notes */
+.list { padding: 0; overflow: hidden; }
+.item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); }
+.item:first-child { border-top: 0; }
+.check { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line); background: transparent;
+  flex: none; padding: 0; display: grid; place-items: center; color: transparent; font-size: 13px; }
+.check.done { background: var(--ok); border-color: var(--ok); color: #fff; }
+.item.done .grow > div:first-child { text-decoration: line-through; color: var(--muted); }
+.addrow { display: flex; gap: 8px; }
+
+/* Capacités */
+.cap-cat { font-size: 12px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: .05em; }
+.cap h3 { margin: 2px 0 4px; font-size: 16px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip { border: 1px solid var(--line); background: var(--surface-2); border-radius: 99px; padding: 6px 11px;
+  font-size: 13.5px; text-align: left; }
+.chip:active { background: var(--accent); color: var(--accent-ink); }
+.tools { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--muted); margin-top: 8px; }
+
+/* Options */
+.seg { display: flex; background: var(--surface-2); border-radius: 10px; padding: 3px; gap: 2px; margin-top: 10px; }
+.seg button { flex: 1; border: 0; background: transparent; border-radius: 8px; padding: 7px 4px; font-size: 13.5px; }
+.seg button.on { background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,.12); font-weight: 600; }
+.switch { position: relative; width: 51px; height: 31px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.switch span { position: absolute; inset: 0; background: var(--line); border-radius: 99px; transition: .2s; }
+.switch span::after { content: ""; position: absolute; left: 2px; top: 2px; width: 27px; height: 27px;
+  background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.switch input:checked + span { background: var(--ok); }
+.switch input:checked + span::after { transform: translateX(20px); }
+.kv { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.kv:first-child { border-top: 0; padding-top: 0; }
+.kv b { font-weight: 500; text-align: right; overflow-wrap: anywhere; }
+
+/* À venir */
+.road .row { align-items: flex-start; }
+.road h3 { margin: 0 0 4px; font-size: 16px; }
+.lvl { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+.lvl.facile { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.lvl.moyen { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.lvl.avance { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
+.star { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 6px 10px; font-size: 13px; margin-top: 10px; }
+.star.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+/* Barre d'onglets */
+nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: saturate(1.4) blur(14px); -webkit-backdrop-filter: saturate(1.4) blur(14px);
+  border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+nav .wrap { display: grid; grid-template-columns: repeat(5, 1fr); padding: 0 4px; }
+nav button { border: 0; background: transparent; padding: 8px 0 7px; color: var(--muted); font-size: 10.5px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; position: relative; }
+nav button svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+nav button.on { color: var(--accent); }
+nav .count { position: absolute; top: 4px; left: 54%; background: var(--run); color: #fff; font-size: 10px;
+  border-radius: 99px; padding: 0 5px; min-width: 16px; line-height: 16px; font-weight: 700; }
+
+.view { display: none; padding-bottom: 24px; } .view.on { display: block; }
+#login { max-width: 420px; margin: 12vh auto 0; padding: 0 16px; }
+#login h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -.02em; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(86px + env(safe-area-inset-bottom));
+  background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; font-size: 14px; z-index: 9;
+  opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
+.toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="login" hidden>
+  <h1>Mon Agent</h1>
+  <p class="muted">Entre le jeton secret (<code>AGENT_TOKEN</code> du fichier <code>.env</code>). Il est gardé uniquement sur cet appareil.</p>
+  <form id="login-form" class="stack">
+    <input type="password" id="token" placeholder="Jeton secret" autocomplete="current-password" required>
+    <button class="btn" style="width:100%">Se connecter</button>
+    <p id="login-err" class="small" style="color:var(--err)"></p>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header><div class="wrap">
+    <h1 id="title">Activité</h1>
+    <span class="pill"><span class="dot" id="conn-dot"></span><span id="conn-txt">…</span></span>
+  </div></header>
+
+  <main class="wrap">
+    <!-- ACTIVITÉ -->
+    <section class="view on" id="v-activite">
+      <div class="stats">
+        <div class="stat"><b id="s-today">0</b><span>demandes aujourd'hui</span></div>
+        <div class="stat"><b id="s-run">0</b><span>en cours</span></div>
+        <div class="stat"><b id="s-tools">0</b><span>outils utilisés</span></div>
+      </div>
+      <form class="composer" id="ask-form">
+        <input type="text" id="ask-input" placeholder="Demande quelque chose à ton agent…" autocomplete="off" enterkeyhint="send">
+        <button class="btn" id="ask-btn">Envoyer</button>
+      </form>
+      <h2>Ce qui se passe</h2>
+      <div id="activity" class="stack"></div>
+    </section>
+
+    <!-- TÂCHES & NOTES -->
+    <section class="view" id="v-taches">
+      <h2>Tâches</h2>
+      <form class="addrow" id="task-form">
+        <input type="text" id="task-input" placeholder="Nouvelle tâche…" autocomplete="off">
+        <button class="btn">Ajouter</button>
+      </form>
+      <div class="card list" id="tasks" style="margin-top:10px"></div>
+      <h2>Notes</h2>
+      <form class="addrow" id="note-form">
+        <input type="text" id="note-input" placeholder="Nouvelle note…" autocomplete="off">
+        <button class="btn">Ajouter</button>
+      </form>
+      <div class="card list" id="notes" style="margin-top:10px"></div>
+    </section>
+
+    <!-- CAPACITÉS -->
+    <section class="view" id="v-capacites">
+      <p class="muted small" style="margin-top:16px">Tout ce que ton agent sait faire. Touche un exemple pour l'envoyer, ou dis-le à Siri avec « Dis Siri, Agent ».</p>
+      <div id="caps" class="stack"></div>
+    </section>
+
+    <!-- OPTIONS -->
+    <section class="view" id="v-options">
+      <h2>Niveau de réflexion</h2>
+      <div class="card">
+        <div class="small muted">Plus haut : réponses plus réfléchies mais plus lentes et plus chères. « low » est idéal à la voix.</div>
+        <div class="seg" id="effort-seg"></div>
+        <div class="small muted" id="effort-help" style="margin-top:8px"></div>
+      </div>
+      <h2>Outils</h2>
+      <div class="card">
+        <div class="row">
+          <div class="grow"><div style="font-weight:600">Recherche web</div>
+            <div class="small muted">Actualités et lecture de pages. Facturé en plus par Anthropic.</div></div>
+          <label class="switch"><input type="checkbox" id="web-toggle"><span></span></label>
+        </div>
+      </div>
+      <h2>Configuration du serveur</h2>
+      <div class="card" id="config"></div>
+      <p class="small muted">Ces valeurs se changent dans le fichier <code>.env</code> du serveur.</p>
+      <h2>Conversation</h2>
+      <div class="card stack">
+        <button class="btn ghost" id="reset-btn" style="width:100%">Nouvelle conversation (effacer la mémoire)</button>
+        <button class="btn danger" id="logout-btn" style="width:100%">Se déconnecter de cet appareil</button>
+      </div>
+    </section>
+
+    <!-- À VENIR -->
+    <section class="view" id="v-avenir">
+      <p class="muted small" style="margin-top:16px">Idées d'options à ajouter plus tard. Marque celles qui t'intéressent, puis demande à Claude Code de les construire.</p>
+      <div id="roadmap" class="stack"></div>
+    </section>
+  </main>
+
+  <nav><div class="wrap" id="tabs"></div></nav>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+// ---------- Utilitaires ----------
+const $ = (s) => document.querySelector(s);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "class") el.className = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : String(kid));
+  return el;
+}
+let toastTimer;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 2600);
+}
+function ago(ts) {
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return "à l'instant";
+  if (s < 3600) return `il y a ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `il y a ${Math.floor(s / 3600)} h`;
+  return new Date(ts * 1000).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+const short = (v) => { const s = typeof v === "string" ? v : JSON.stringify(v); return s.length > 60 ? s.slice(0, 57) + "…" : s; };
+
+// ---------- API ----------
+let token = store.get("agent_token", "");
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    ...opts,
+    headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json", ...(opts.headers || {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (r.status === 401) { logout(); throw new Error("Jeton invalide"); }
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `Erreur ${r.status}`);
+  return r.json();
+}
+
+// ---------- Onglets ----------
+const TABS = [
+  ["activite", "Activité", '<path d="M3 12h4l3-8 4 16 3-8h4"/>'],
+  ["taches", "Tâches", '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/>'],
+  ["capacites", "Capacités", '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.5 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/>'],
+  ["options", "Options", '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'],
+  ["avenir", "À venir", '<path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/>'],
+];
+let current = store.get("agent_tab", "activite");
+function showTab(id) {
+  current = id; store.set("agent_tab", id);
+  for (const [t, label] of TABS) {
+    $("#v-" + t).classList.toggle("on", t === id);
+    $("#tab-" + t).classList.toggle("on", t === id);
+    if (t === id) $("#title").textContent = label === "Tâches" ? "Tâches & notes" : label;
+  }
+  window.scrollTo(0, 0);
+}
+function buildTabs() {
+  const box = $("#tabs");
+  for (const [id, label, icon] of TABS) {
+    const b = h("button", { id: "tab-" + id, onclick: () => showTab(id), "aria-label": label });
+    b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>`;
+    b.append(h("span", {}, label));
+    if (id === "activite") b.append(h("span", { class: "count", id: "run-count", hidden: true }, "0"));
+    box.append(b);
+  }
+}
+
+// ---------- Rendu ----------
+let state = null;
+const STATUTS = { en_cours: "En cours", termine: "Terminé", erreur: "Erreur", refus: "Refusé", interrompu: "Interrompu" };
+const NOMS_OUTILS = {
+  prix_crypto: "Prix crypto", marche_crypto: "Marché crypto", note_ajouter: "Note ajoutée", notes_lister: "Lecture des notes",
+  note_supprimer: "Note supprimée", tache_ajouter: "Tâche ajoutée", taches_lister: "Lecture des tâches",
+  tache_terminer: "Tâche terminée", date_heure: "Date et heure", action_iphone: "Action iPhone",
+  web_search: "Recherche web", web_fetch: "Lecture de page",
+};
+
+function renderActivity() {
+  const list = state.activite;
+  const today = new Date().toDateString();
+  const running = list.filter((a) => a.statut === "en_cours").length;
+  $("#s-today").textContent = list.filter((a) => new Date(a.debut * 1000).toDateString() === today).length;
+  $("#s-run").textContent = running;
+  $("#s-tools").textContent = list.reduce((n, a) => n + a.etapes.length, 0);
+  const rc = $("#run-count"); rc.textContent = running; rc.hidden = !running;
+  $("#conn-dot").className = "dot " + (running ? "run" : "ok");
+  $("#conn-txt").textContent = running ? "travaille…" : "connecté";
+
+  const box = $("#activity"); box.replaceChildren();
+  if (!list.length) {
+    box.append(h("div", { class: "card empty" }, "Aucune activité pour l'instant.", h("br"),
+      "Parle à Siri ou écris une demande ci-dessus."));
+    return;
+  }
+  for (const a of list) {
+    const dur = a.fin ? `${Math.round(a.fin - a.debut)} s` : `${Math.round(Date.now() / 1000 - a.debut)} s…`;
+    const act = a.action;
+    box.append(h("article", { class: "card" },
+      h("div", { class: "act-head" },
+        h("div", { class: "act-q" }, a.demande),
+        h("span", { class: "badge " + a.statut }, STATUTS[a.statut] || a.statut)),
+      h("div", { class: "meta" }, `${a.source === "web" ? "Tableau de bord" : "iPhone"} · ${ago(a.debut)} · ${dur}`),
+      a.etapes.length ? h("div", { class: "steps" }, a.etapes.map((e) =>
+        h("span", { class: "step" + (e.erreur ? " err" : ""), title: e.resultat || "" },
+          (NOMS_OUTILS[e.outil] || e.outil) + (e.entree && Object.keys(e.entree).length ? " · " + short(e.entree.query || e.entree.ids || e.entree.texte || e.entree.titre || e.entree.url || e.entree) : "")))) : null,
+      a.reponse ? h("div", { class: "reply" }, a.reponse) : null,
+      act ? h("div", { class: "action" }, "Action iPhone : " + act.type + (act.texte ? " · " + act.texte : "") + (act.url ? " · " + act.url : "") + (act.date ? " · " + act.date : "")) : null,
+    ));
+  }
+}
+
+function renderTasks() {
+  const box = $("#tasks"); box.replaceChildren();
+  const tasks = [...state.taches].sort((a, b) => (a.faite - b.faite));
+  if (!tasks.length) box.append(h("div", { class: "empty" }, "Aucune tâche. Ajoute-en une, ou dis « Ajoute la tâche… » à Siri."));
+  for (const t of tasks) {
+    box.append(h("div", { class: "item" + (t.faite ? " done" : "") },
+      h("button", { class: "check" + (t.faite ? " done" : ""), "aria-label": t.faite ? "Rouvrir" : "Terminer",
+        onclick: () => mutate(`/api/taches/${t.id}/basculer`, { method: "POST" }) }, "✓"),
+      h("div", { class: "grow" }, h("div", {}, t.titre),
+        h("div", { class: "small muted" }, t.echeance ? "Échéance : " + t.echeance : "Créée le " + t.cree_le)),
+      h("button", { class: "icon-btn", "aria-label": "Supprimer", onclick: () => mutate(`/api/taches/${t.id}`, { method: "DELETE" }) }, "×")));
+  }
+  const nbox = $("#notes"); nbox.replaceChildren();
+  if (!state.notes.length) nbox.append(h("div", { class: "empty" }, "Aucune note."));
+  for (const n of state.notes) {
+    nbox.append(h("div", { class: "item" },
+      h("div", { class: "grow" }, h("div", { style: "overflow-wrap:anywhere" }, n.texte), h("div", { class: "small muted" }, n.cree_le)),
+      h("button", { class: "icon-btn", "aria-label": "Supprimer", onclick: () => mutate(`/api/notes/${n.id}`, { method: "DELETE" }) }, "×")));
+  }
+}
+
+function renderCaps() {
+  const box = $("#caps"); if (box.childElementCount) return; // statique
+  for (const c of state.capacites) {
+    box.append(h("div", { class: "card cap" },
+      h("div", { class: "cap-cat" }, c.categorie),
+      h("h3", {}, c.titre),
+      h("div", { class: "muted small" }, c.description),
+      h("div", { class: "chips" }, c.exemples.map((ex) => h("button", { class: "chip", onclick: () => { showTab("activite"); send(ex); } }, "« " + ex + " »"))),
+      h("div", { class: "tools" }, c.outils.join(" · "))));
+  }
+}
+
+const EFFORT_AIDE = {
+  low: "Rapide et économique : parfait pour les questions du quotidien et Siri.",
+  medium: "Équilibré : un peu plus de réflexion pour les demandes à plusieurs étapes.",
+  high: "Approfondi : analyses de marché, comparaisons, recherches détaillées.",
+  xhigh: "Très approfondi : tâches longues et complexes. Plus lent.",
+  max: "Réflexion maximale : réservé aux problèmes difficiles. Le plus lent et le plus cher.",
+};
+function renderOptions() {
+  const o = state.options;
+  const seg = $("#effort-seg"); seg.replaceChildren();
+  for (const e of state.efforts) seg.append(h("button", { class: e === o.effort ? "on" : "", onclick: () => setOption({ effort: e }) }, e));
+  $("#effort-help").textContent = EFFORT_AIDE[o.effort] || "";
+  $("#web-toggle").checked = !!o.enable_web;
+  const rows = [
+    ["Modèle", o.model], ["Secours si refus par erreur", o.fallbacks ? "activé" : "désactivé"],
+    ["Mémoire de conversation", o.session_ttl_hours + " h"], ["Fuseau horaire", o.timezone],
+    ["Serveur démarré", ago(state.demarre_depuis)],
+  ];
+  $("#config").replaceChildren(...rows.map(([k, v]) => h("div", { class: "kv" }, h("span", { class: "muted" }, k), h("b", {}, v))));
+}
+
+const ROADMAP = [
+  { titre: "Solde de mes wallets", niveau: "facile", desc: "Lire le solde ETH et les tokens d'une adresse publique (Etherscan), en lecture seule.", besoin: "Clé API Etherscan gratuite" },
+  { titre: "Alertes de prix", niveau: "moyen", desc: "« Préviens-moi si le BTC passe sous 55 000 € » : surveillance en arrière-plan et notification sur l'iPhone.", besoin: "App ntfy ou Pushover sur l'iPhone" },
+  { titre: "Indicateurs techniques", niveau: "moyen", desc: "RSI, MACD, moyennes mobiles et bandes de Bollinger calculés sur l'historique des prix.", besoin: "Rien de plus (données CoinGecko)" },
+  { titre: "Graphiques dans le tableau de bord", niveau: "moyen", desc: "Courbes de prix et indicateurs affichés directement ici.", besoin: "Rien de plus" },
+  { titre: "Portefeuille et performance", niveau: "moyen", desc: "Enregistrer tes positions et suivre leur valeur, gains et pertes au jour le jour.", besoin: "Rien de plus" },
+  { titre: "Briefing automatique du matin", niveau: "facile", desc: "Chaque matin : marché, tes tâches du jour et actualités, lus par Siri ou envoyés en notification.", besoin: "Automatisation iOS ou tâche planifiée" },
+  { titre: "Suivi du minage", niveau: "moyen", desc: "Hashrate, difficulté et estimation de rentabilité selon ton matériel et ton coût d'électricité.", besoin: "API publique (ex. mempool.space)" },
+  { titre: "Agenda et e-mails", niveau: "avance", desc: "Lire ton agenda Google, préparer des brouillons d'e-mails (jamais d'envoi sans ta validation).", besoin: "Connexion Google (OAuth)" },
+  { titre: "Bot Telegram", niveau: "moyen", desc: "Parler à ton agent par Telegram en plus de Siri, avec réponses écrites.", besoin: "Bot Telegram (gratuit)" },
+  { titre: "Mémoire longue durée", niveau: "moyen", desc: "L'agent retient tes préférences et ton contexte d'une conversation à l'autre.", besoin: "Rien de plus" },
+  { titre: "Laboratoire blockchain (testnet)", niveau: "avance", desc: "Créer et tester un token ou un smart contract sur un réseau de test, sans argent réel.", besoin: "Wallet de test + Sepolia" },
+];
+function renderRoadmap() {
+  const box = $("#roadmap"); box.replaceChildren();
+  const fav = store.get("agent_roadmap", []);
+  const sorted = [...ROADMAP].sort((a, b) => fav.includes(b.titre) - fav.includes(a.titre));
+  for (const r of sorted) {
+    const on = fav.includes(r.titre);
+    box.append(h("div", { class: "card road" },
+      h("div", { class: "row" }, h("h3", { class: "grow" }, r.titre),
+        h("span", { class: "lvl " + r.niveau }, { facile: "Facile", moyen: "Moyen", avance: "Avancé" }[r.niveau])),
+      h("div", { class: "muted small" }, r.desc),
+      h("div", { class: "small", style: "margin-top:6px" }, h("span", { class: "muted" }, "Il faut : "), r.besoin),
+      h("button", { class: "star" + (on ? " on" : ""), onclick: () => {
+        const f = store.get("agent_roadmap", []);
+        store.set("agent_roadmap", on ? f.filter((x) => x !== r.titre) : [...f, r.titre]);
+        renderRoadmap();
+      } }, on ? "★ Ça m'intéresse" : "☆ Ça m'intéresse")));
+  }
+}
+
+function render() {
+  renderActivity(); renderTasks(); renderCaps(); renderOptions();
+}
+
+// ---------- Actions ----------
+let pollTimer;
+async function refresh() {
+  clearTimeout(pollTimer);
+  try {
+    state = await api("/api/state");
+    render();
+  } catch (e) {
+    if (token) { $("#conn-dot").className = "dot err"; $("#conn-txt").textContent = "hors ligne"; }
+  }
+  const busy = state && state.activite.some((a) => a.statut === "en_cours");
+  if (token) pollTimer = setTimeout(refresh, document.hidden ? 30000 : busy ? 1500 : 5000);
+}
+async function mutate(path, opts) {
+  try { await api(path, opts); } catch (e) { toast(e.message); }
+  refresh();
+}
+async function setOption(body) {
+  try { state.options = await api("/api/options", { method: "POST", body }); renderOptions(); toast("Option enregistrée"); }
+  catch (e) { toast(e.message); }
+}
+async function send(text) {
+  text = text.trim(); if (!text) return;
+  const btn = $("#ask-btn"); btn.disabled = true; $("#ask-input").value = "";
+  setTimeout(refresh, 400); // fait apparaître la tâche « en cours »
+  try {
+    const r = await api("/ask", { method: "POST", body: { text, source: "web" } });
+    if (r.action_type === "ouvrir_url" && r.action_url) toast("Lien proposé : voir l'activité");
+  } catch (e) { toast(e.message); }
+  btn.disabled = false; refresh();
+}
+function logout() {
+  token = ""; store.del("agent_token"); clearTimeout(pollTimer);
+  $("#app").hidden = true; $("#login").hidden = false;
+}
+
+// ---------- Démarrage ----------
+$("#login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  token = $("#token").value.trim();
+  try {
+    await api("/api/state");
+    store.set("agent_token", token); start();
+  } catch { $("#login-err").textContent = "Jeton refusé. Vérifie AGENT_TOKEN dans le fichier .env."; token = ""; }
+});
+$("#ask-form").addEventListener("submit", (e) => { e.preventDefault(); send($("#ask-input").value); });
+$("#task-form").addEventListener("submit", (e) => {
+  e.preventDefault(); const v = $("#task-input").value.trim(); if (!v) return;
+  $("#task-input").value = ""; mutate("/api/taches", { method: "POST", body: { titre: v } });
+});
+$("#note-form").addEventListener("submit", (e) => {
+  e.preventDefault(); const v = $("#note-input").value.trim(); if (!v) return;
+  $("#note-input").value = ""; mutate("/api/notes", { method: "POST", body: { texte: v } });
+});
+$("#web-toggle").addEventListener("change", (e) => setOption({ enable_web: e.target.checked }));
+$("#reset-btn").addEventListener("click", async () => {
+  try { await api("/reset?session=iphone", { method: "POST" }); toast("Mémoire effacée : nouvelle conversation"); } catch (e) { toast(e.message); }
+});
+$("#logout-btn").addEventListener("click", logout);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && token) refresh(); });
+
+function start() {
+  $("#login").hidden = true; $("#app").hidden = false;
+  showTab(TABS.some(([t]) => t === current) ? current : "activite");
+  renderRoadmap(); refresh();
+}
+buildTabs();
+if (token) start(); else $("#login").hidden = false;
+</script>
+</body>
+</html>

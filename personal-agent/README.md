@@ -74,6 +74,22 @@ Pour écrire au lieu de parler, remplace l'étape 1 par **Demander une entrée**
 
 **Tâches automatiques :** dans Raccourcis → Automatisation, crée par exemple « Chaque jour à 8 h » → exécuter un raccourci qui envoie « Fais-moi le point du marché crypto et de mes tâches du jour ».
 
+## 4. Le tableau de bord (sur l'iPhone ou l'ordinateur)
+
+Ouvre `https://mon-mac.tailXXXX.ts.net/` dans Safari et entre ton `AGENT_TOKEN` (il reste enregistré sur l'appareil).
+
+Pour l'avoir comme une app : bouton Partager → **Sur l'écran d'accueil**.
+
+| Onglet | Contenu |
+|---|---|
+| **Activité** | Toutes les demandes (Siri ou tableau de bord) en direct : en cours, terminées, en erreur. Pour chacune, les outils utilisés étape par étape, la réponse et l'action iPhone. Tu peux aussi écrire une demande ici. |
+| **Tâches** | Tes tâches et tes notes : ajouter, cocher, supprimer. Ce sont les mêmes que celles que gère l'agent. |
+| **Capacités** | Tout ce que l'agent sait faire, avec des exemples sur lesquels appuyer pour les envoyer. |
+| **Options** | Niveau de réflexion (low → max), recherche web on/off, configuration du serveur, nouvelle conversation. |
+| **À venir** | Idées d'options à ajouter plus tard. Marque celles qui t'intéressent. |
+
+L'activité se rafraîchit toutes les 1,5 s pendant qu'une tâche tourne, sinon toutes les 5 s.
+
 ## Format de l'API
 
 ```http
@@ -86,6 +102,7 @@ Authorization: Bearer <AGENT_TOKEN>
 ```
 
 `GET /health` vérifie que le serveur tourne. `POST /reset` efface la conversation.
+Le tableau de bord utilise `GET /api/state`, `POST|DELETE /api/taches…`, `POST|DELETE /api/notes…` et `POST /api/options` (même jeton).
 
 ## Ajouter tes propres outils
 

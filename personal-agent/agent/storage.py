@@ -67,6 +67,53 @@ class JsonStore:
             self._write(self._list_path(name), kept)
             return True
 
+    # --- options modifiables depuis le tableau de bord -----------------------
+    def get_options(self) -> dict:
+        with _lock:
+            return self._read(self.data_dir / "options.json", {})
+
+    def set_options(self, **changes: Any) -> None:
+        with _lock:
+            opts = self._read(self.data_dir / "options.json", {})
+            opts.update(changes)
+            self._write(self.data_dir / "options.json", opts)
+
+    # --- journal d'activité (ce que l'agent fait, en direct) ---------------
+    ACTIVITY_MAX = 200
+
+    def activity_start(self, texte: str, source: str) -> str:
+        with _lock:
+            items = self._read(self._list_path("activite"), [])
+            entry = {"id": uuid.uuid4().hex[:8], "debut": time.time(), "fin": None, "source": source,
+                     "demande": texte, "statut": "en_cours", "etapes": [], "reponse": "", "action": None}
+            items.append(entry)
+            self._write(self._list_path("activite"), items[-self.ACTIVITY_MAX:])
+            return entry["id"]
+
+    def activity_update(self, entry_id: str, etape: dict | None = None, **fields: Any) -> None:
+        with _lock:
+            items = self._read(self._list_path("activite"), [])
+            for entry in items:
+                if entry["id"] == entry_id:
+                    if etape:
+                        entry["etapes"].append({**etape, "t": time.time()})
+                    entry.update(fields)
+                    break
+            self._write(self._list_path("activite"), items)
+
+    def activity_mark_interrupted(self) -> None:
+        """Au démarrage : une tâche restée « en cours » a été coupée par un redémarrage."""
+        with _lock:
+            items = self._read(self._list_path("activite"), [])
+            for entry in items:
+                if entry["statut"] == "en_cours":
+                    entry.update(statut="interrompu", fin=entry["debut"])
+            self._write(self._list_path("activite"), items)
+
+    def activity_list(self, limit: int = 50) -> list[dict]:
+        with _lock:
+            return self._read(self._list_path("activite"), [])[-limit:][::-1]
+
     # --- sessions -----------------------------------------------------------
     def _session_path(self, session_id: str) -> Path:
         safe = "".join(c for c in session_id if c.isalnum() or c in "-_")[:64] or "default"

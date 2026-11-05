@@ -266,3 +266,37 @@ def run_tool(ctx: ToolContext, name: str, args: dict) -> tuple[str, bool]:
         return str(e), True
     except httpx.HTTPError as e:
         return f"Erreur réseau : {e}", True
+
+
+# --- Catalogue affiché dans le tableau de bord ------------------------------------
+# (catégorie, titre, description, outils, exemples de phrases à dire ou toucher)
+CAPACITES = [
+    {"categorie": "Crypto", "titre": "Prix en direct",
+     "description": "Prix, variation sur 24 h et capitalisation de n'importe quelle crypto.",
+     "outils": ["prix_crypto"],
+     "exemples": ["Prix du bitcoin et de l'ethereum ?", "Combien vaut Solana en dollars ?"]},
+    {"categorie": "Crypto", "titre": "Santé du marché",
+     "description": "Capitalisation totale, volume, dominance BTC/ETH.",
+     "outils": ["marche_crypto"],
+     "exemples": ["Comment va le marché crypto aujourd'hui ?", "Quelle est la dominance du bitcoin ?"]},
+    {"categorie": "Organisation", "titre": "Tâches",
+     "description": "Ajouter, lister et terminer des tâches, avec échéance facultative.",
+     "outils": ["tache_ajouter", "taches_lister", "tache_terminer"],
+     "exemples": ["Ajoute la tâche : finir le graphique RSI", "Quelles sont mes tâches ?"]},
+    {"categorie": "Organisation", "titre": "Notes",
+     "description": "Garder des idées et les relire plus tard.",
+     "outils": ["note_ajouter", "notes_lister", "note_supprimer"],
+     "exemples": ["Note : idée de wallet multi-signature", "Lis-moi mes notes"]},
+    {"categorie": "iPhone", "titre": "Actions sur le téléphone",
+     "description": "Créer un rappel iOS, ouvrir un lien, copier un texte, afficher une notification.",
+     "outils": ["action_iphone"],
+     "exemples": ["Rappelle-moi demain à 9 h d'acheter de l'ETH", "Ouvre le graphique BTC sur TradingView"]},
+    {"categorie": "Recherche", "titre": "Recherche web",
+     "description": "Chercher l'actualité et lire des pages web (désactivable dans Options).",
+     "outils": ["web_search", "web_fetch"],
+     "exemples": ["Quelles sont les dernières actus sur le minage ?", "Résume les news Ethereum de la semaine"]},
+    {"categorie": "Divers", "titre": "Date et heure",
+     "description": "Connaît la date et l'heure dans ton fuseau horaire.",
+     "outils": ["date_heure"],
+     "exemples": ["Quel jour sommes-nous ?"]},
+]

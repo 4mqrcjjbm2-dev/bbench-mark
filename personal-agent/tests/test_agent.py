@@ -117,3 +117,40 @@ def test_server_auth(settings):
     assert r.status_code == 200
     assert r.json() == {"reply": "Salut !", "action_type": "aucune", "action_texte": "",
                         "action_url": "", "action_date": ""}
+
+
+def test_dashboard_api(settings):
+    from fastapi.testclient import TestClient
+
+    from agent import server
+
+    server._agent = Agent(settings, client=FakeClient([
+        msg([{"type": "tool_use", "id": "t1", "name": "tache_ajouter", "input": {"titre": "RSI"}}], "tool_use"),
+        msg([{"type": "text", "text": "Ajouté."}], "end_turn"),
+    ]))
+    c = TestClient(server.app)
+    H = {"Authorization": "Bearer " + "t" * 32}
+
+    assert c.get("/").status_code == 200  # page servie sans jeton (aucun secret dedans)
+    assert c.get("/api/state").status_code == 401
+
+    c.post("/ask", json={"text": "ajoute RSI", "source": "web"}, headers=H)
+    st = c.get("/api/state", headers=H).json()
+    act = st["activite"][0]
+    assert act["statut"] == "termine" and act["source"] == "web" and act["reponse"] == "Ajouté."
+    assert act["etapes"][0]["outil"] == "tache_ajouter"
+    tache = st["taches"][0]
+    assert tache["titre"] == "RSI" and st["capacites"]
+
+    assert c.post(f"/api/taches/{tache['id']}/basculer", headers=H).json()["faite"] is True
+    note = c.post("/api/notes", json={"texte": "idée"}, headers=H).json()
+    assert c.delete(f"/api/notes/{note['id']}", headers=H).status_code == 200
+
+    assert c.post("/api/options", json={"effort": "high", "enable_web": False}, headers=H).json()["effort"] == "high"
+    assert c.post("/api/options", json={"effort": "turbo"}, headers=H).status_code == 400
+    # Les options modifiées s'appliquent aux requêtes suivantes.
+    server._agent.client.beta.messages.replies.append(msg([{"type": "text", "text": "ok"}], "end_turn"))
+    c.post("/ask", json={"text": "test"}, headers=H)
+    last = server._agent.client.beta.messages.calls[-1]
+    assert last["output_config"] == {"effort": "high"}
+    assert all(t.get("name") != "web_search" for t in last["tools"])
