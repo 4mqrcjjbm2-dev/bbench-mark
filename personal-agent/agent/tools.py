@@ -1,0 +1,521 @@
+"""Outils que Claude peut appeler. Chaque outil = un schéma + une fonction Python."""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+from typing import Any, Callable
+from zoneinfo import ZoneInfo
+
+import httpx
+
+from . import etat, net
+from .agents_outils import OUTILS_AGENTS, OutilErreur, prix_secours_coinbase
+from .outils_atelier import ERREURS as ERREURS_ATELIER, OUTILS_ATELIER
+from .backtest import STRATEGIES, BacktestErreur, Parametres, executer, recuperer_prix
+from .cerveau import Cerveau, CerveauErreur
+from .storage import JsonStore
+
+COINGECKO = "https://api.coingecko.com/api/v3"
+
+
+class ToolError(Exception):
+    """Erreur renvoyée à Claude comme tool_result is_error=True."""
+
+
+class ToolContext:
+    """État partagé pendant une requête : stockage + action à exécuter sur l'iPhone."""
+
+    def __init__(self, store: JsonStore, timezone: str, http: httpx.Client | None = None,
+                 cerveau: Cerveau | None = None, cles=None, specialiste=None, lecture_seule: bool = False,
+                 atelier=None, searxng_url: str = "", kiwix_url: str = "") -> None:
+        self.store = store
+        self.timezone = timezone
+        self.http = http or httpx.Client(timeout=15, headers={"User-Agent": "Jarvis-personnel/1.0"})
+        self.cerveau = cerveau
+        self.cles = cles                  # coffre à clés (cles.Cles)
+        self.specialiste = specialiste    # callable(agent, demande) -> str, fourni par l'Agent
+        self.lecture_seule = lecture_seule
+        self.atelier = atelier            # atelier.Atelier : création de fichiers et demandes d'autorisation
+        self.searxng_url = searxng_url
+        self.kiwix_url = kiwix_url        # le Savoir hors ligne (Kiwix)
+        self.iphone_action: dict | None = None
+
+
+def _req(args: dict, key: str) -> Any:
+    value = args.get(key)
+    if value in (None, "", []):
+        raise ToolError(f"Paramètre '{key}' manquant.")
+    return value
+
+
+# --- Crypto -----------------------------------------------------------------
+
+def prix_crypto(ctx: ToolContext, args: dict) -> str:
+    ids = _req(args, "ids")
+    if isinstance(ids, str):
+        ids = [ids]
+    devise = (args.get("devise") or "eur").lower()
+    ids = [i.strip().lower() for i in ids]
+    try:
+        data = net.get_json(ctx.http, f"{COINGECKO}/simple/price", service="coingecko", ttl=30, params={
+            "ids": ",".join(ids), "vs_currencies": devise,
+            "include_24hr_change": "true", "include_market_cap": "true"})
+    except net.ServiceErreur:
+        data = prix_secours_coinbase(ctx.http, ids, devise)  # CoinGecko tombé : Coinbase en secours
+        if not data:
+            raise
+    if not data:
+        raise ToolError("Aucune crypto trouvée. Utilise les identifiants CoinGecko (ex: bitcoin, ethereum, solana).")
+    return json.dumps(data, ensure_ascii=False)
+
+
+def marche_crypto(ctx: ToolContext, args: dict) -> str:
+    d = net.get_json(ctx.http, f"{COINGECKO}/global", service="coingecko", ttl=120)["data"]
+    resume = {
+        "capitalisation_totale_usd": d["total_market_cap"].get("usd"),
+        "volume_24h_usd": d["total_volume"].get("usd"),
+        "variation_cap_24h_pct": d.get("market_cap_change_percentage_24h_usd"),
+        "dominance_pct": {k: round(v, 2) for k, v in list(d["market_cap_percentage"].items())[:5]},
+        "nb_cryptos_actives": d.get("active_cryptocurrencies"),
+    }
+    return json.dumps(resume, ensure_ascii=False)
+
+
+# --- Notes & tâches -----------------------------------------------------------
+
+def note_ajouter(ctx: ToolContext, args: dict) -> str:
+    item = ctx.store.add_item("notes", texte=_req(args, "texte"))
+    return f"Note enregistrée (id {item['id']})."
+
+
+def notes_lister(ctx: ToolContext, args: dict) -> str:
+    notes = ctx.store.list_items("notes")
+    return json.dumps(notes[-30:], ensure_ascii=False) if notes else "Aucune note."
+
+
+def note_supprimer(ctx: ToolContext, args: dict) -> str:
+    if not ctx.store.delete_item("notes", _req(args, "id")):
+        raise ToolError("Note introuvable.")
+    return "Note supprimée."
+
+
+def tache_ajouter(ctx: ToolContext, args: dict) -> str:
+    item = ctx.store.add_item(
+        "taches", titre=_req(args, "titre"), echeance=args.get("echeance") or None, faite=False
+    )
+    return f"Tâche ajoutée (id {item['id']})."
+
+
+def taches_lister(ctx: ToolContext, args: dict) -> str:
+    taches = ctx.store.list_items("taches")
+    if not args.get("inclure_faites"):
+        taches = [t for t in taches if not t.get("faite")]
+    return json.dumps(taches, ensure_ascii=False) if taches else "Aucune tâche en cours."
+
+
+def tache_terminer(ctx: ToolContext, args: dict) -> str:
+    if not ctx.store.update_item("taches", _req(args, "id"), faite=True):
+        raise ToolError("Tâche introuvable.")
+    return "Tâche marquée comme faite."
+
+
+# --- Divers -------------------------------------------------------------------
+
+def date_heure(ctx: ToolContext, args: dict) -> str:
+    now = dt.datetime.now(ZoneInfo(ctx.timezone))
+    return now.strftime(f"%A %d %B %Y, %H:%M ({ctx.timezone})")
+
+
+ACTIONS_IPHONE = {"rappel", "ouvrir_url", "copier", "notification"}
+
+
+def action_iphone(ctx: ToolContext, args: dict) -> str:
+    type_ = _req(args, "type")
+    if type_ not in ACTIONS_IPHONE:
+        raise ToolError(f"Type inconnu. Choix : {sorted(ACTIONS_IPHONE)}")
+    if type_ == "ouvrir_url" and not str(args.get("url", "")).startswith(("http://", "https://")):
+        raise ToolError("Pour 'ouvrir_url', fournis une URL http(s) valide dans 'url'.")
+    if type_ in ("rappel", "copier", "notification") and not args.get("texte"):
+        raise ToolError(f"Pour '{type_}', fournis 'texte'.")
+    ctx.iphone_action = {
+        "type": type_,
+        "texte": args.get("texte") or "",
+        "url": args.get("url") or "",
+        "date": args.get("date") or "",
+    }
+    return "Action programmée : l'iPhone l'exécutera à la réception de ta réponse."
+
+
+# --- Backtests ------------------------------------------------------------------
+
+def lancer_backtest(ctx: ToolContext, args: dict) -> dict:
+    """Utilisé par l'outil et par le tableau de bord. Retourne le résultat complet."""
+    actif = str(_req(args, "actif")).strip().lower()
+    devise = (args.get("devise") or "eur").lower()
+    jours = int(args.get("jours") or 365)
+    if not 90 <= jours <= 365:
+        raise ToolError("La période doit être entre 90 et 365 jours.")
+    p = Parametres(
+        strategie=args.get("strategie") or "tendance",
+        stop_pct=float(args.get("stop_pct") or 5),
+        frais_pct=float(args.get("frais_pct") if args.get("frais_pct") is not None else 0.2),
+        rapide=args.get("rapide"), lente=args.get("lente"), bas=args.get("bas"), haut=args.get("haut"),
+    )
+    if not 0.5 <= p.stop_pct <= 50:
+        raise ToolError("Le stop doit être entre 0,5 % et 50 %.")
+    try:
+        prix = recuperer_prix(ctx.http, actif, devise, jours)
+        etat.signaler("coingecko", True, "Historique récupéré")
+        res = executer(prix, p)
+    except BacktestErreur as e:
+        raise ToolError(str(e)) from e
+    res.update(actif=actif, devise=devise)
+    return ctx.store.add_item("backtests", cap=30, **res)
+
+
+def backtest(ctx: ToolContext, args: dict) -> str:
+    res = lancer_backtest(ctx, args)
+    resume = {k: v for k, v in res.items() if k not in ("courbe", "courbe_buy_hold")}
+    return json.dumps(resume, ensure_ascii=False)
+
+
+# --- Mémoire du Cerveau -----------------------------------------------------------
+
+def _cerveau(ctx: ToolContext) -> Cerveau:
+    if not ctx.cerveau or not ctx.cerveau.disponible:
+        raise ToolError("Mémoire du Cerveau non connectée (AGENT_CERVEAU_DIR).")
+    return ctx.cerveau
+
+
+def memoire_lire(ctx: ToolContext, args: dict) -> str:
+    try:
+        return _cerveau(ctx).lire(_req(args, "fichier"))
+    except CerveauErreur as e:
+        raise ToolError(str(e)) from e
+
+
+def memoire_journal(ctx: ToolContext, args: dict) -> str:
+    return _cerveau(ctx).noter_journal(_req(args, "titre"), _req(args, "tache"), _req(args, "resultat"),
+                                       args.get("lecon") or "aucune")
+
+
+def memoire_lecon(ctx: ToolContext, args: dict) -> str:
+    return _cerveau(ctx).ajouter_lecon(_req(args, "categorie"), _req(args, "ce_qui_sest_passe"),
+                                       _req(args, "pourquoi"), _req(args, "regle"))
+
+
+def memoire_prediction(ctx: ToolContext, args: dict) -> str:
+    try:
+        return _cerveau(ctx).enregistrer_prediction(_req(args, "actif"), _req(args, "prix"),
+                                                    _req(args, "prediction"), _req(args, "raison"),
+                                                    _req(args, "echeance"))
+    except CerveauErreur as e:
+        raise ToolError(str(e)) from e
+
+
+def agents_catalogue(ctx: ToolContext, args: dict) -> str:
+    from .catalogue import resume_catalogue
+    return resume_catalogue()
+
+
+# --- Déclarations envoyées à l'API ------------------------------------------------
+
+def _obj(props: dict, required: list[str]) -> dict:
+    return {"type": "object", "properties": props, "required": required, "additionalProperties": False}
+
+
+TOOLS: list[tuple[dict, Callable[[ToolContext, dict], str]]] = [
+    (
+        {
+            "name": "prix_crypto",
+            "description": "Prix actuel, variation 24h et capitalisation d'une ou plusieurs cryptos (CoinGecko).",
+            "input_schema": _obj(
+                {
+                    "ids": {"type": "array", "items": {"type": "string"},
+                            "description": "Identifiants CoinGecko, ex: ['bitcoin','ethereum']."},
+                    "devise": {"type": "string", "description": "Devise de cotation, ex: eur, usd. Défaut eur."},
+                },
+                ["ids"],
+            ),
+        },
+        prix_crypto,
+    ),
+    (
+        {
+            "name": "marche_crypto",
+            "description": "Vue d'ensemble du marché crypto : capitalisation totale, volume, dominance BTC/ETH.",
+            "input_schema": _obj({}, []),
+        },
+        marche_crypto,
+    ),
+    (
+        {
+            "name": "note_ajouter",
+            "description": "Enregistre une note pour l'utilisateur.",
+            "input_schema": _obj({"texte": {"type": "string"}}, ["texte"]),
+        },
+        note_ajouter,
+    ),
+    (
+        {"name": "notes_lister", "description": "Liste les dernières notes.", "input_schema": _obj({}, [])},
+        notes_lister,
+    ),
+    (
+        {
+            "name": "note_supprimer",
+            "description": "Supprime une note par son id.",
+            "input_schema": _obj({"id": {"type": "string"}}, ["id"]),
+        },
+        note_supprimer,
+    ),
+    (
+        {
+            "name": "tache_ajouter",
+            "description": "Ajoute une tâche à la liste de l'utilisateur.",
+            "input_schema": _obj(
+                {"titre": {"type": "string"},
+                 "echeance": {"type": "string", "description": "Date/heure ISO 8601 facultative."}},
+                ["titre"],
+            ),
+        },
+        tache_ajouter,
+    ),
+    (
+        {
+            "name": "taches_lister",
+            "description": "Liste les tâches (en cours par défaut).",
+            "input_schema": _obj({"inclure_faites": {"type": "boolean"}}, []),
+        },
+        taches_lister,
+    ),
+    (
+        {
+            "name": "tache_terminer",
+            "description": "Marque une tâche comme faite.",
+            "input_schema": _obj({"id": {"type": "string"}}, ["id"]),
+        },
+        tache_terminer,
+    ),
+    (
+        {
+            "name": "date_heure",
+            "description": "Date et heure actuelles dans le fuseau de l'utilisateur.",
+            "input_schema": _obj({}, []),
+        },
+        date_heure,
+    ),
+    (
+        {
+            "name": "agents_catalogue",
+            "description": ("Liste les agents de l'écosystème Jarvis (Catalogue officiel) : rôle, statut "
+                            "(livré, en test, à bâtir) et ce qu'ils font déjà dans Jarvis."),
+            "input_schema": _obj({}, []),
+        },
+        agents_catalogue,
+    ),
+    (
+        {
+            "name": "action_iphone",
+            "description": (
+                "Demande à l'iPhone d'exécuter UNE action à la réception de la réponse : "
+                "'rappel' (crée un rappel iOS : texte + date ISO facultative), 'ouvrir_url' (url), "
+                "'copier' (copie texte dans le presse-papiers), 'notification' (affiche texte). "
+                "N'utilise que si l'utilisateur le demande."
+            ),
+            "input_schema": _obj(
+                {
+                    "type": {"type": "string", "enum": sorted(ACTIONS_IPHONE)},
+                    "texte": {"type": "string"},
+                    "url": {"type": "string"},
+                    "date": {"type": "string", "description": "ISO 8601, ex: 2026-11-06T09:00"},
+                },
+                ["type"],
+            ),
+        },
+        action_iphone,
+    ),
+    (
+        {
+            "name": "backtest",
+            "description": (
+                "Teste une stratégie de trading sur l'historique quotidien d'une crypto (90 à 365 jours). "
+                "Simulation uniquement. Rapporte toujours le résultat ET la pire chute, le taux de réussite "
+                "et la comparaison avec « acheter et garder ». Stratégies : "
+                + "; ".join(f"{k} = {v['regle']}" for k, v in STRATEGIES.items())
+            ),
+            "input_schema": _obj(
+                {
+                    "actif": {"type": "string", "description": "Identifiant CoinGecko, ex: bitcoin."},
+                    "strategie": {"type": "string", "enum": list(STRATEGIES)},
+                    "jours": {"type": "integer", "description": "90 à 365. Défaut 365."},
+                    "stop_pct": {"type": "number", "description": "Stop-loss en %. Défaut 5."},
+                    "frais_pct": {"type": "number", "description": "Frais par ordre en %. Défaut 0,2."},
+                    "rapide": {"type": "integer", "description": "MM rapide (tendance, croisement_mm)."},
+                    "lente": {"type": "integer", "description": "MM lente (tendance, croisement_mm)."},
+                    "bas": {"type": "number", "description": "Seuil RSI d'entrée (rsi)."},
+                    "haut": {"type": "number", "description": "Seuil RSI de sortie (rsi)."},
+                    "devise": {"type": "string"},
+                },
+                ["actif"],
+            ),
+        },
+        backtest,
+    ),
+]
+
+TOOLS_CERVEAU: list[tuple[dict, Callable[[ToolContext, dict], str]]] = [
+    (
+        {
+            "name": "memoire_lire",
+            "description": ("Lit un fichier de la mémoire du Cerveau (chemin relatif à memoire/, ex: "
+                            "predictions.md, connaissances/crypto.md, journal/2026-11.md)."),
+            "input_schema": _obj({"fichier": {"type": "string"}}, ["fichier"]),
+        },
+        memoire_lire,
+    ),
+    (
+        {
+            "name": "memoire_journal",
+            "description": "Note une tâche importante dans le journal du Cerveau (pas pour les petites questions).",
+            "input_schema": _obj(
+                {"titre": {"type": "string"}, "tache": {"type": "string"},
+                 "resultat": {"type": "string", "description": "réussi / partiel / raté + détail court"},
+                 "lecon": {"type": "string", "description": "L-0XX ou « aucune »"}},
+                ["titre", "tache", "resultat"],
+            ),
+        },
+        memoire_journal,
+    ),
+    (
+        {
+            "name": "memoire_lecon",
+            "description": ("Ajoute une leçon quand le propriétaire te corrige ou que tu t'es trompé. "
+                            "Lis d'abord lecons.md : si la leçon existe déjà, ne la duplique pas."),
+            "input_schema": _obj(
+                {"categorie": {"type": "string"}, "ce_qui_sest_passe": {"type": "string"},
+                 "pourquoi": {"type": "string"},
+                 "regle": {"type": "string", "description": "Phrase à l'impératif, applicable telle quelle."}},
+                ["categorie", "ce_qui_sest_passe", "pourquoi", "regle"],
+            ),
+        },
+        memoire_lecon,
+    ),
+    (
+        {
+            "name": "memoire_prediction",
+            "description": ("Enregistre une prédiction de marché pour la vérifier plus tard (mesure de "
+                            "compréhension, jamais un conseil). Récupère d'abord le prix actuel."),
+            "input_schema": _obj(
+                {"actif": {"type": "string"}, "prix": {"type": "string"},
+                 "prediction": {"type": "string", "description": "ex: hausse, baisse, entre X et Y"},
+                 "raison": {"type": "string"}, "echeance": {"type": "string", "description": "AAAA-MM-JJ"}},
+                ["actif", "prix", "prediction", "raison", "echeance"],
+            ),
+        },
+        memoire_prediction,
+    ),
+]
+
+TOOLS += OUTILS_AGENTS + OUTILS_ATELIER
+TOOL_SCHEMAS = [schema for schema, _ in TOOLS]
+TOOL_SCHEMAS_CERVEAU = [schema for schema, _ in TOOLS_CERVEAU]
+HANDLERS = {schema["name"]: fn for schema, fn in TOOLS + TOOLS_CERVEAU}
+
+SERVER_TOOLS = [
+    {"type": "web_search_20260209", "name": "web_search", "max_uses": 5},
+    {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 3},
+]
+
+
+def run_tool(ctx: ToolContext, name: str, args: dict) -> tuple[str, bool]:
+    """Exécute un outil. Retourne (contenu, is_error)."""
+    fn = HANDLERS.get(name)
+    if fn is None:
+        return f"Outil inconnu : {name}", True
+    try:
+        return fn(ctx, args or {}), False
+    except (ToolError, OutilErreur, net.ServiceErreur, *ERREURS_ATELIER) as e:
+        return str(e), True
+    except httpx.HTTPError as e:
+        if "coingecko" in str(getattr(getattr(e, "request", None), "url", "")):
+            etat.signaler("coingecko", False, str(e))
+        return f"Erreur réseau : {e}", True
+    except Exception as e:  # noqa: BLE001 - l'agent doit recevoir l'erreur pour se corriger, jamais planter
+        import logging
+        logging.getLogger("outils").exception("outil %s", name)
+        return f"Erreur inattendue dans {name} : {type(e).__name__}: {e}. Essaie autrement.", True
+
+
+# --- Catalogue affiché dans le tableau de bord ------------------------------------
+# (catégorie, titre, description, outils, exemples de phrases à dire ou toucher)
+CAPACITES = [
+    {"categorie": "Crypto", "titre": "Prix en direct",
+     "description": "Prix, variation sur 24 h et capitalisation de n'importe quelle crypto.",
+     "outils": ["prix_crypto"],
+     "exemples": ["Prix du bitcoin et de l'ethereum ?", "Combien vaut Solana en dollars ?"]},
+    {"categorie": "Crypto", "titre": "Santé du marché",
+     "description": "Capitalisation totale, volume, dominance BTC/ETH.",
+     "outils": ["marche_crypto"],
+     "exemples": ["Comment va le marché crypto aujourd'hui ?", "Quelle est la dominance du bitcoin ?"]},
+    {"categorie": "Crypto", "titre": "Tendances (PULSE)",
+     "description": "Cryptos les plus recherchées, plus fortes hausses et baisses du top 100.",
+     "outils": ["tendances_crypto"],
+     "exemples": ["Quelles cryptos montent le plus aujourd'hui ?"]},
+    {"categorie": "Trading", "titre": "Lecture technique (Sniper Pro)",
+     "description": "MM20/50, RSI, MACD, Bollinger et score sur 5. Description, jamais un ordre.",
+     "outils": ["analyse_technique"],
+     "exemples": ["Fais la lecture technique de Solana"]},
+    {"categorie": "Marchés", "titre": "Bourses, devises, matières (LEDGER, VAULT)",
+     "description": "S&P 500, Nasdaq, Dow Jones, dollar canadien, or, argent, pétrole, gaz.",
+     "outils": ["marches_financiers", "matieres_premieres"],
+     "exemples": ["Comment vont les bourses et l'or ?", "Combien vaut le pétrole ?"]},
+    {"categorie": "Crypto", "titre": "Portefeuilles publics (ORCA)",
+     "description": "Solde et dernières transactions d'une adresse Bitcoin (sans clé) ou Ethereum (clé Etherscan).",
+     "outils": ["portefeuille_public"],
+     "exemples": ["Regarde l'adresse bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"]},
+    {"categorie": "iPhone", "titre": "Rapport et notifications (BEACON)",
+     "description": "Rapport du moment ou du matin, et notifications sur l'iPhone via l'app ntfy.",
+     "outils": ["rapport_du_jour", "notifier"],
+     "exemples": ["Envoie-moi le rapport du jour sur mon iPhone"]},
+    {"categorie": "Spécialistes", "titre": "ECHO, SILK, AURA, FESTA, FORGE, NEON, RIG, AEGIS, Agent Pub",
+     "description": "Chacun cherche sur le web dans son domaine et te répond concrètement.",
+     "outils": ["consulter_specialiste"],
+     "exemples": ["Qu'est-ce qui monte sur TikTok cette semaine ?", "Quoi préparer pour vendre à Noël ?",
+                  "Optimise mon PC gaming", "Écris une annonce pour mon linge de travail"]},
+    {"categorie": "Organisation", "titre": "Tâches",
+     "description": "Ajouter, lister et terminer des tâches, avec échéance facultative.",
+     "outils": ["tache_ajouter", "taches_lister", "tache_terminer"],
+     "exemples": ["Ajoute la tâche : finir le graphique RSI", "Quelles sont mes tâches ?"]},
+    {"categorie": "Organisation", "titre": "Notes",
+     "description": "Garder des idées et les relire plus tard.",
+     "outils": ["note_ajouter", "notes_lister", "note_supprimer"],
+     "exemples": ["Note : idée de wallet multi-signature", "Lis-moi mes notes"]},
+    {"categorie": "iPhone", "titre": "Actions sur le téléphone",
+     "description": "Créer un rappel iOS, ouvrir un lien, copier un texte, afficher une notification.",
+     "outils": ["action_iphone"],
+     "exemples": ["Rappelle-moi demain à 9 h d'acheter de l'ETH", "Ouvre le graphique BTC sur TradingView"]},
+    {"categorie": "Recherche", "titre": "Recherche web",
+     "description": "Chercher l'actualité et lire des pages web (désactivable dans Options).",
+     "outils": ["web_search", "web_fetch"],
+     "exemples": ["Quelles sont les dernières actus sur le minage ?", "Résume les news Ethereum de la semaine"]},
+    {"categorie": "Trading", "titre": "Backtests",
+     "description": "Tester une stratégie sur 90 à 365 jours d'historique : gain, pire chute, taux de réussite. Simulation uniquement.",
+     "outils": ["backtest"],
+     "exemples": ["Backteste la stratégie tendance sur le bitcoin sur un an", "Compare RSI et tendance sur l'ethereum"]},
+    {"categorie": "Cerveau", "titre": "Mémoire à long terme",
+     "description": "Lit ta doctrine, tes leçons et tes connaissances ; note le journal, les leçons et les prédictions.",
+     "outils": ["memoire_lire", "memoire_journal", "memoire_lecon", "memoire_prediction"],
+     "exemples": ["Quelles leçons as-tu apprises ?", "Note une prédiction sur le BTC pour demain"]},
+    {"categorie": "Écosystème", "titre": "Caro t'explique Jarvis",
+     "description": "Choisis Caro pour comprendre l'application : sections, agents du Catalogue, ce qui est livré ou à bâtir.",
+     "outils": ["agents_catalogue"],
+     "exemples": ["Caro, explique-moi la Blackbox", "Quels agents sont déjà livrés ?"]},
+    {"categorie": "Divers", "titre": "Date et heure",
+     "description": "Connaît la date et l'heure dans ton fuseau horaire.",
+     "outils": ["date_heure"],
+     "exemples": ["Quel jour sommes-nous ?"]},
+]
+
+
+# Les agents de la Blackbox (catalogue officiel) et le lien outil → agent : voir catalogue.py

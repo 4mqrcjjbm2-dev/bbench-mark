@@ -1,0 +1,55 @@
+# Jarvis complet, 100 % open source : Jarvis + Ollama (IA libre) + SearXNG (recherche web libre).
+# Lancement : ./deploy/installer-serveur.sh   (ou : docker compose up -d --build)
+services:
+  jarvis:
+    build: .
+    env_file: .env
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      SEARXNG_URL: http://searxng:8080
+      AGENT_DATA_DIR: /data
+      AGENT_ATELIER: /atelier
+      KIWIX_URL: ${KIWIX_URL:-}  # rempli par deploy/telecharger-savoir.sh
+    volumes:
+      - ./data:/data            # tâches, notes, activité, clés (coffre)
+      - ./atelier:/atelier      # tout ce que Jarvis crée
+      # Mémoire du Cerveau : décommente et ajoute AGENT_CERVEAU_DIR=/cerveau dans .env
+      # - ~/cerveaux-:/cerveau
+    ports:
+      - "127.0.0.1:8787:8787"   # visible seulement sur le serveur ; l'iPhone passe par Tailscale
+    depends_on: [ollama, searxng]
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_KEEP_ALIVE: 5m       # décharge le modèle après 5 min sans demande : moins de mémoire, moins d'énergie
+      OLLAMA_NUM_PARALLEL: "1"    # une demande à la fois : moins de mémoire sur un petit serveur
+    volumes:
+      - ollama:/root/.ollama    # modèles téléchargés
+    restart: unless-stopped
+    # Carte graphique NVIDIA : décommente pour aller beaucoup plus vite.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET}
+    volumes:
+      - ./deploy/searxng:/etc/searxng
+    restart: unless-stopped
+
+  # Le Savoir hors ligne : Wikipédia & co (fichiers .zim). Démarré par deploy/telecharger-savoir.sh.
+  kiwix:
+    image: ghcr.io/kiwix/kiwix-serve:latest
+    command: ["*.zim"]
+    volumes:
+      - ./zim:/data
+    profiles: ["savoir"]
+    restart: unless-stopped
+
+volumes:
+  ollama:
