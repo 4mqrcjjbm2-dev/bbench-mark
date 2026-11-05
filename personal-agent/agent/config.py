@@ -36,12 +36,17 @@ class Settings:
     fallbacks: bool
     cerveau_dir: Path | None
     cerveau_push: bool
+    fournisseur: str          # "ollama" (libre, gratuit) ou "anthropic" (Claude, clé payante)
+    ollama_url: str
+    searxng_url: str
+    atelier_dir: Path         # le dossier de création de Jarvis
 
 
 def load_settings() -> Settings:
+    fournisseur = os.environ.get("AGENT_FOURNISSEUR", "ollama").lower()
     return Settings(
         agent_token=os.environ.get("AGENT_TOKEN", ""),
-        model=os.environ.get("AGENT_MODEL", "claude-opus-5-5"),
+        model=os.environ.get("AGENT_MODEL", "qwen3:8b" if fournisseur == "ollama" else "claude-opus-5-5"),
         effort=os.environ.get("AGENT_EFFORT", "low"),
         data_dir=Path(os.environ.get("AGENT_DATA_DIR", ROOT / "data")),
         session_ttl_hours=float(os.environ.get("AGENT_SESSION_TTL_HOURS", "6")),
@@ -51,4 +56,8 @@ def load_settings() -> Settings:
         fallbacks=os.environ.get("AGENT_FALLBACKS", "1") != "0",
         cerveau_dir=Path(os.environ["AGENT_CERVEAU_DIR"]).expanduser() if os.environ.get("AGENT_CERVEAU_DIR") else None,
         cerveau_push=os.environ.get("AGENT_CERVEAU_PUSH", "1") != "0",
+        fournisseur=fournisseur,
+        ollama_url=os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/"),
+        searxng_url=os.environ.get("SEARXNG_URL", "").rstrip("/"),
+        atelier_dir=Path(os.environ.get("AGENT_ATELIER", Path.home() / "Jarvis")).expanduser(),
     )

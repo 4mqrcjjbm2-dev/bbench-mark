@@ -16,7 +16,9 @@ PERSONAS = {
         "declencheur": "Dire « Cortana » (Raccourci vocal iOS)",
         # Cortana fait le travail elle-même pour ce qui n'a pas d'agent spécialisé.
         "outils": ["note_ajouter", "notes_lister", "note_supprimer", "tache_ajouter", "taches_lister",
-                   "tache_terminer", "date_heure", "action_iphone"],
+                   "tache_terminer", "date_heure", "action_iphone", "creer_document", "creer_tableur",
+                   "creer_site", "atelier_ecrire", "atelier_lire", "atelier_lister", "verifier_fichier",
+                   "executer_commande", "etat_demande"],
     },
     "caro": {
         "id": "caro", "nom": "Caro", "couleur": "#b26bff",
@@ -30,7 +32,8 @@ PERSONAS = {
 OUTILS_LECTURE = {"prix_crypto", "marche_crypto", "notes_lister", "taches_lister", "date_heure",
                   "memoire_lire", "agents_catalogue", "web_search", "web_fetch", "tendances_crypto",
                   "marches_financiers", "matieres_premieres", "analyse_technique", "portefeuille_public",
-                  "rapport_du_jour", "consulter_specialiste"}
+                  "rapport_du_jour", "consulter_specialiste", "recherche_web", "lire_page",
+                  "atelier_lire", "atelier_lister", "verifier_fichier", "etat_demande"}
 
 # --- Groupes (couleurs Neurolab) -------------------------------------------------------------
 GROUPES = {
@@ -118,7 +121,7 @@ CATALOGUE = [
     {"id": "prism", "num": 9, "nom": "PRISM", "court": "PRISM", "groupe": "analyse",
      "role": "Analyste",
      "fait": "Décompose une info compliquée (marché, nouvelle, document) en morceaux clairs.",
-     "statut": "a_batir", "statut_txt": "Conçu, rôle à confirmer", "outils": ["web_search", "web_fetch", "consulter_specialiste"],
+     "statut": "a_batir", "statut_txt": "Conçu, rôle à confirmer", "outils": ["web_search", "web_fetch", "recherche_web", "lire_page", "consulter_specialiste"],
      "dans_jarvis": "Recherche et lecture web, et décompose une info compliquée en points clairs."},
     {"id": "silk", "num": 17, "nom": "SILK", "court": "SILK", "groupe": "commerce",
      "role": "Chasseur de tendances mode",
@@ -223,4 +226,8 @@ NEXUS (mémoire du Cerveau), PRISM (recherche web), les spécialistes ECHO, SILK
 AEGIS et Agent Pub (chacun avec sa recherche web), VOX (parler québécois), et Cortana (tâches, notes, rappels, \
 iPhone). Encore à bâtir : JARVIS iPhone et Terminal JARVIS (produits séparés), Swarm (aucun trading autonome \
 sans tests), TAO Staking, Gardiens.
+Atelier : Cortana crée de vrais fichiers (Word, PDF, Excel, sites, code) dans le dossier de Jarvis, visibles \
+dans la section Atelier de la page. Toute commande sur la machine, et tout fichier hors de l'atelier, attend \
+une autorisation : « Autoriser » dans la page, section Atelier.
+Moteur IA : libre et gratuit avec Ollama (modèle open source), ou Claude avec une clé.
 Clés API : elles se collent dans la page, section Connexions → Clés API, et s'activent tout de suite."""

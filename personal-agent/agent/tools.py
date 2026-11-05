@@ -11,6 +11,7 @@ import httpx
 
 from . import etat, net
 from .agents_outils import OUTILS_AGENTS, OutilErreur, prix_secours_coinbase
+from .outils_atelier import ERREURS as ERREURS_ATELIER, OUTILS_ATELIER
 from .backtest import STRATEGIES, BacktestErreur, Parametres, executer, recuperer_prix
 from .cerveau import Cerveau, CerveauErreur
 from .storage import JsonStore
@@ -26,7 +27,8 @@ class ToolContext:
     """État partagé pendant une requête : stockage + action à exécuter sur l'iPhone."""
 
     def __init__(self, store: JsonStore, timezone: str, http: httpx.Client | None = None,
-                 cerveau: Cerveau | None = None, cles=None, specialiste=None, lecture_seule: bool = False) -> None:
+                 cerveau: Cerveau | None = None, cles=None, specialiste=None, lecture_seule: bool = False,
+                 atelier=None, searxng_url: str = "") -> None:
         self.store = store
         self.timezone = timezone
         self.http = http or httpx.Client(timeout=15, headers={"User-Agent": "Jarvis-personnel/1.0"})
@@ -34,6 +36,8 @@ class ToolContext:
         self.cles = cles                  # coffre à clés (cles.Cles)
         self.specialiste = specialiste    # callable(agent, demande) -> str, fourni par l'Agent
         self.lecture_seule = lecture_seule
+        self.atelier = atelier            # atelier.Atelier : création de fichiers et demandes d'autorisation
+        self.searxng_url = searxng_url
         self.iphone_action: dict | None = None
 
 
@@ -412,7 +416,7 @@ TOOLS_CERVEAU: list[tuple[dict, Callable[[ToolContext, dict], str]]] = [
     ),
 ]
 
-TOOLS += OUTILS_AGENTS
+TOOLS += OUTILS_AGENTS + OUTILS_ATELIER
 TOOL_SCHEMAS = [schema for schema, _ in TOOLS]
 TOOL_SCHEMAS_CERVEAU = [schema for schema, _ in TOOLS_CERVEAU]
 HANDLERS = {schema["name"]: fn for schema, fn in TOOLS + TOOLS_CERVEAU}
@@ -430,12 +434,16 @@ def run_tool(ctx: ToolContext, name: str, args: dict) -> tuple[str, bool]:
         return f"Outil inconnu : {name}", True
     try:
         return fn(ctx, args or {}), False
-    except (ToolError, OutilErreur, net.ServiceErreur) as e:
+    except (ToolError, OutilErreur, net.ServiceErreur, *ERREURS_ATELIER) as e:
         return str(e), True
     except httpx.HTTPError as e:
         if "coingecko" in str(getattr(getattr(e, "request", None), "url", "")):
             etat.signaler("coingecko", False, str(e))
         return f"Erreur réseau : {e}", True
+    except Exception as e:  # noqa: BLE001 - l'agent doit recevoir l'erreur pour se corriger, jamais planter
+        import logging
+        logging.getLogger("outils").exception("outil %s", name)
+        return f"Erreur inattendue dans {name} : {type(e).__name__}: {e}. Essaie autrement.", True
 
 
 # --- Catalogue affiché dans le tableau de bord ------------------------------------

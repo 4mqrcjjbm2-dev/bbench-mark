@@ -18,7 +18,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import anthropic
-from fastapi import Depends, FastAPI, Header, HTTPException
+import hashlib
+import mimetypes
+
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -109,6 +112,16 @@ def check_token(authorization: str = Header(default="")) -> None:
 
 
 auth = [Depends(check_token)]
+
+# Cookie dérivé du jeton : sert UNIQUEMENT à ouvrir les fichiers de l'atelier dans le navigateur
+# (aperçus, téléchargements). L'API exige toujours l'en-tête Authorization.
+def _jeton_atelier() -> str:
+    return hmac.new(settings.agent_token.encode(), b"atelier", hashlib.sha256).hexdigest()
+
+
+def check_atelier(jarvis_atelier: str = Cookie(default="")) -> None:
+    if not hmac.compare_digest(jarvis_atelier.encode(), _jeton_atelier().encode()):
+        raise HTTPException(status_code=401, detail="Ouvre d'abord la page Jarvis et connecte-toi.")
 
 
 # --- Modèles ----------------------------------------------------------------------
@@ -261,9 +274,25 @@ def _ping_coingecko() -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
+def _ping_ollama() -> None:
+    """Vérifie qu'Ollama répond et que le modèle choisi est installé (au plus une fois par minute)."""
+    def run() -> None:
+        try:
+            r = httpx.get(f"{settings.ollama_url}/api/tags", timeout=5)
+            noms = {m.get("name", "") for m in r.json().get("models", [])}
+            present = settings.model in noms or f"{settings.model}:latest" in noms
+            etat.signaler("ollama", present, f"Modèle {settings.model} prêt" if present else
+                          f"Modèle {settings.model} absent : lance « ollama pull {settings.model} »")
+        except (httpx.HTTPError, ValueError):
+            etat.signaler("ollama", False, f"Ollama ne répond pas à {settings.ollama_url}")
+    threading.Thread(target=run, daemon=True).start()
+
+
 def _connexions(agent: Agent, activite: list[dict]) -> list[dict]:
     e = etat.lire()
     _en_cache("ping", 60, lambda: _ping_coingecko() or True)
+    if settings.fournisseur == "ollama":
+        _en_cache("ping_ollama", 60, lambda: _ping_ollama() or True)
 
     def statut(cle: str, defaut: str = "inconnu") -> str:
         if cle not in e:
@@ -274,11 +303,23 @@ def _connexions(agent: Agent, activite: list[dict]) -> list[dict]:
     dernier_iphone = next((a["debut"] for a in activite if a["source"] == "iphone"), None)
     opts = agent.options()
     cerveau = agent.cerveau
+    if settings.fournisseur == "ollama":
+        moteur = {"id": "claude", "nom": f"Moteur IA libre (Ollama · {settings.model})",
+                  "statut": statut("ollama"), "detail": e.get("ollama", {}).get("detail", "Vérification…"),
+                  "dernier_ok": e.get("claude", {}).get("dernier_ok") or e.get("ollama", {}).get("dernier_ok")}
+    else:
+        moteur = {"id": "claude", "nom": f"Claude ({settings.model})",
+                  "statut": statut("claude", "ok" if cle_api else "erreur"),
+                  "detail": e.get("claude", {}).get("detail") or ("Clé API configurée" if cle_api else "ANTHROPIC_API_KEY manquante"),
+                  "dernier_ok": e.get("claude", {}).get("dernier_ok")}
     out = [
-        {"id": "claude", "nom": "Claude (cerveau de Jarvis)",
-         "statut": statut("claude", "ok" if cle_api else "erreur"),
-         "detail": e.get("claude", {}).get("detail") or ("Clé API configurée" if cle_api else "ANTHROPIC_API_KEY manquante"),
-         "dernier_ok": e.get("claude", {}).get("dernier_ok")},
+        moteur,
+        {"id": "recherche", "nom": "Recherche web libre (SearXNG, secours DuckDuckGo)",
+         "statut": "ok" if (e.get("searxng", {}).get("ok") or e.get("duckduckgo", {}).get("ok")) else
+         ("erreur" if ("searxng" in e or "duckduckgo" in e) else "inconnu"),
+         "detail": (f"SearXNG : {settings.searxng_url}" if settings.searxng_url else "SearXNG non configuré : DuckDuckGo utilisé")
+         + (f" · {e['searxng']['detail']}" if "searxng" in e else ""),
+         "dernier_ok": (e.get("searxng") or e.get("duckduckgo") or {}).get("dernier_ok")},
         {"id": "coingecko", "nom": "CoinGecko (prix et historique)", "statut": statut("coingecko"),
          "detail": e.get("coingecko", {}).get("detail", "Vérification…"),
          "dernier_ok": e.get("coingecko", {}).get("dernier_ok")},
@@ -328,6 +369,9 @@ def state() -> dict:
         "backtests": agent.store.list_items("backtests")[::-1][:12],
         "strategies": STRATEGIES,
         "cerveau": cerveau,
+        "atelier": agent.atelier.lister("", 40),
+        "atelier_racine": str(agent.atelier.racine),
+        "demandes": agent.store.list_items("demandes")[::-1][:20],
         "connexions": _connexions(agent, activite),
         "options": agent.options(),
         "efforts": list(EFFORTS),
@@ -432,3 +476,86 @@ def beacon_test() -> dict:
         return {"ok": True, "texte": envoyer_rapport(get_agent())}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Envoi impossible : {e}") from e
+
+
+# --- Atelier : galerie, fichiers, autorisations -------------------------------------------
+
+@app.post("/api/session", dependencies=auth)
+def session(response: Response) -> dict:
+    """Pose le cookie qui permet d'ouvrir les créations dans le navigateur (aperçus, téléchargements)."""
+    response.set_cookie("jarvis_atelier", _jeton_atelier(), httponly=True, samesite="strict",
+                        max_age=60 * 60 * 24 * 90, path="/atelier")
+    return {"ok": True}
+
+
+@app.get("/atelier/{chemin:path}", dependencies=[Depends(check_atelier)], include_in_schema=False)
+def atelier_fichier(chemin: str) -> FileResponse:
+    agent = get_agent()
+    try:
+        p = agent.atelier.chemin(chemin)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(404, "Introuvable") from e
+    if p.is_dir():
+        p = p / "index.html"
+    if not p.is_file():
+        raise HTTPException(404, "Introuvable")
+    type_ = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+    # Bac à sable : une page créée par l'IA ne peut ni lire le cookie ni appeler l'API Jarvis.
+    return FileResponse(p, media_type=type_, headers={
+        "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads",
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+
+@app.delete("/api/atelier", dependencies=auth)
+def atelier_supprimer(chemin: str) -> dict:
+    agent = get_agent()
+    try:
+        p = agent.atelier.chemin(chemin)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+    if not p.is_file():
+        raise HTTPException(404, "Fichier introuvable")
+    p.unlink()
+    return {"ok": True}
+
+
+def _trouver_demande(agent, did: str) -> dict:
+    d = next((x for x in agent.store.list_items("demandes") if x["id"] == did), None)
+    if not d:
+        raise HTTPException(404, "Demande introuvable")
+    if d["statut"] != "en_attente":
+        raise HTTPException(409, "Cette demande a déjà été traitée")
+    return d
+
+
+@app.post("/api/demandes/{did}/autoriser", dependencies=auth)
+def demande_autoriser(did: str) -> dict:
+    agent = get_agent()
+    d = _trouver_demande(agent, did)
+    agent.store.update_item("demandes", did, statut="en_cours", autorisee=time.time())
+
+    def run() -> None:
+        res = agent.atelier.executer_demande(d)
+        agent.store.update_item("demandes", did, statut="terminee" if res["code"] == 0 else "echec",
+                                resultat=res, fin=time.time())
+        topic = agent.cles.get("NTFY_TOPIC")
+        if topic:
+            try:
+                ctx = ToolContext(agent.store, settings.timezone)
+                envoyer_notification(ctx.http, topic, "Jarvis : demande " + ("réussie" if res["code"] == 0 else "en échec"),
+                                     (d["details"].get("commande") or d["details"].get("chemin", "")) + "\n"
+                                     + res["sortie"][-500:])
+                ctx.http.close()
+            except Exception:  # noqa: BLE001 - la notification est un bonus
+                pass
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True}
+
+
+@app.post("/api/demandes/{did}/refuser", dependencies=auth)
+def demande_refuser(did: str) -> dict:
+    agent = get_agent()
+    _trouver_demande(agent, did)
+    agent.store.update_item("demandes", did, statut="refusee", fin=time.time())
+    return {"ok": True}

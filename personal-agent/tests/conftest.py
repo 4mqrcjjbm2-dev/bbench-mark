@@ -4,10 +4,12 @@ import pytest
 
 os.environ.setdefault("AGENT_TOKEN", "t" * 32)
 os.environ["JARVIS_SANS_PLANIFICATEUR"] = "1"
+os.environ.setdefault("AGENT_FOURNISSEUR", "anthropic")  # les tests historiques visent Claude ; Ollama a les siens
 
 
 @pytest.fixture(autouse=True)
-def _propre(monkeypatch):
+def _propre(monkeypatch, tmp_path_factory):
+    monkeypatch.setenv("AGENT_ATELIER", str(tmp_path_factory.mktemp("atelier")))
     from agent import etat, net
     net.vider_cache()
     etat.reinitialiser()

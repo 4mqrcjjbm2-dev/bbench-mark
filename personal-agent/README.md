@@ -1,5 +1,64 @@
 # Jarvis — agent personnel pour iPhone
 
+## Jarvis libre : ton outil de création, 100 % open source et gratuit
+
+Jarvis tourne **sur ton serveur**, avec des logiciels libres :
+- **Ollama**, le moteur IA : des modèles libres comme Qwen 3 ou gpt-oss, sur ta machine, ou les modèles cloud gratuits d'Ollama ;
+- **SearXNG**, la recherche web libre et privée, avec DuckDuckGo en secours ;
+- **Jarvis**, le serveur et la page.
+
+Claude reste possible en option, si un jour tu ajoutes une clé : `AGENT_FOURNISSEUR=anthropic`.
+
+### Installer en une commande (serveur Linux, Ubuntu ou Debian)
+
+```bash
+git clone <ton dépôt> && cd bbench-mark/personal-agent
+./deploy/installer-serveur.sh qwen3:8b       # ou qwen3:14b, gpt-oss:20b… selon la mémoire du serveur
+```
+
+Le script fait tout le reste :
+- il installe Docker ;
+- il génère ton jeton secret et celui de SearXNG ;
+- il lance Jarvis, Ollama et SearXNG ;
+- il télécharge le modèle ;
+- il prépare l'accès depuis l'iPhone par Tailscale.
+
+**Quel modèle choisir ?**
+
+| Ton serveur | Modèle conseillé |
+|---|---|
+| 8 Go de mémoire, sans carte graphique | `qwen3:8b` : marche, mais lentement |
+| 16 Go et plus | `qwen3:14b` |
+| Carte graphique 16 à 24 Go | `qwen3:32b` ou `gpt-oss:20b` : rapide et bien meilleur |
+| Petit serveur, mais tu veux la qualité | un modèle cloud gratuit d'Ollama (liste sur [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud)), après `docker compose exec ollama ollama signin` |
+
+Les petits modèles libres se trompent plus souvent que les grands. Si un résultat ne te convient pas, prends un modèle plus gros.
+
+### L'Atelier : ce que Jarvis crée pour vrai
+
+Dis à Cortana « Crée mon CV en PDF », « Fais un budget Excel », « Crée un site pour mon garage » ou « Écris un script qui trie mes fichiers ». Elle fabrique le **vrai fichier** dans l'atelier (`./atelier` sur le serveur), et tu le retrouves dans la section **Atelier** de la page : ouvrir, télécharger, aperçu des sites, supprimer.
+
+| Création | Outil | Résultat |
+|---|---|---|
+| Lettres, CV, guides | `creer_document` | Word (.docx), PDF, Markdown |
+| Budgets, inventaires | `creer_tableur` | Excel (.xlsx), avec formules et totaux |
+| Sites, applis web | `creer_site` | HTML, CSS et JS, vérifiés automatiquement, aperçu dans la page |
+| Code, scripts | `atelier_ecrire` puis `verifier_fichier` | Python, JS, JSON… vérifiés et corrigés jusqu'à ce que ça passe |
+| Recherche | `recherche_web` puis `lire_page` | Sources lues et citées |
+
+**Autocorrection :** après chaque création de code ou de site, Jarvis le vérifie et corrige ses erreurs. Si un outil échoue, il essaie un autre chemin. Quand tu le corriges, il note une leçon dans le Cerveau.
+
+### Agir sur la machine : tout, avec ta confirmation
+
+Toute **commande**, et tout fichier écrit **hors de l'atelier**, crée une **demande d'autorisation**. Rien ne s'exécute avant que tu touches **Autoriser** dans la page, section Atelier. Ensuite, le résultat s'affiche dans la page et arrive en notification sur l'iPhone. Avec Docker, les commandes tournent dans le conteneur de Jarvis, sur le dossier de l'atelier.
+
+**Sécurité :**
+- Les pages créées par l'IA s'ouvrent dans un **bac à sable** : elles ne peuvent ni lire ta session ni appeler l'API de Jarvis.
+- Jarvis refuse de lire les adresses internes du réseau.
+- Caro ne crée et n'exécute rien.
+
+---
+
 **Jarvis, c'est l'écosystème au complet.** On lui parle par deux voix :
 - **Cortana exécute** les tâches avec l'application. Elle a tous les outils : crypto, backtests, mémoire, tâches, notes, rappels, actions iPhone.
 - **Caro explique** l'application : les sections, les agents du Catalogue, ce qui est livré ou à bâtir. Elle consulte, mais ne modifie rien. Si on lui demande d'agir, elle renvoie vers Cortana, et un garde-fou dans le code bloque toute écriture.

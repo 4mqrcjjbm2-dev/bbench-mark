@@ -10,6 +10,8 @@ import anthropic
 
 from . import etat
 from .agents_outils import SPECIALISTES
+from .atelier import Atelier
+from .llm import creer_client, creer_message
 from .cerveau import Cerveau
 from .cles import Cles
 from .config import Settings
@@ -45,6 +47,15 @@ technique, SOL Paper Trader backtests, ORCA portefeuilles publics, BEACON notifi
 consulter_specialiste pour ECHO, SILK, AURA, FESTA, FORGE, NEON, RIG, AEGIS, PRISM, Agent Pub). Appelle \
 plusieurs outils en parallèle quand ils sont indépendants. Si une source ne répond pas, dis-le en une phrase \
 et donne ce que tu as. Si une clé manque, dis exactement où la coller (page Jarvis, Connexions → Clés API).
+
+Atelier (créer) : quand on te demande de créer quelque chose, crée le VRAI fichier avec creer_document \
+(Word/PDF), creer_tableur (Excel), creer_site (site ou appli web) ou atelier_ecrire (code, scripts), puis \
+donne son nom. Fais un travail complet et soigné du premier coup : contenu réel, pas de « à compléter ».
+Autocorrection : après avoir créé du code ou un site, appelle verifier_fichier et corrige jusqu'à ok=true. \
+Si un outil échoue, lis l'erreur et essaie un autre chemin avant d'abandonner.
+Agir sur la machine : executer_commande crée une demande d'autorisation ; dis au propriétaire d'autoriser \
+dans la page (section Atelier), puis consulte le résultat avec etat_demande.
+Web : cherche (recherche_web), puis lis les pages utiles (lire_page) avant de répondre ; cite tes sources.
 
 Finance : donne des données et des explications neutres. Tu ne fais pas de recommandation \
 personnalisée d'achat ou de vente ; rappelle brièvement les risques si on te le demande.
@@ -103,10 +114,11 @@ class Agent:
     def __init__(self, settings: Settings, client: anthropic.Anthropic | None = None,
                  store: JsonStore | None = None) -> None:
         self.settings = settings
-        self.client = client or anthropic.Anthropic()
+        self.client = client or creer_client(settings)
         self.store = store or JsonStore(settings.data_dir)
         self.cerveau = Cerveau(settings.cerveau_dir, settings.cerveau_push, settings.timezone) \
             if settings.cerveau_dir else None
+        self.atelier = Atelier(settings.atelier_dir, self.store)
         self.cles = Cles(settings.data_dir)
         self.cles.generer_auto()  # sujet ntfy : rien à faire pour le propriétaire
 
@@ -114,6 +126,7 @@ class Agent:
         """Réglages modifiables depuis le tableau de bord (sinon valeurs du .env)."""
         saved = self.store.get_options()
         return {
+            "fournisseur": self.settings.fournisseur,
             "model": self.settings.model,
             "effort": saved.get("effort", self.settings.effort),
             "enable_web": saved.get("enable_web", self.settings.enable_web),
@@ -154,34 +167,25 @@ class Agent:
     def outils(self, persona: str) -> list[dict]:
         opts = self.options()
         cerveau_ok = bool(self.cerveau and self.cerveau.disponible)
-        tools = TOOL_SCHEMAS + (TOOL_SCHEMAS_CERVEAU if cerveau_ok else []) \
-            + (SERVER_TOOLS if opts["enable_web"] else [])
+        web_serveur = self.settings.fournisseur == "anthropic" and opts["enable_web"]
+        tools = [t for t in TOOL_SCHEMAS
+                 if opts["enable_web"] or t["name"] not in ("recherche_web", "lire_page")]
+        if web_serveur:  # Claude a sa propre recherche web : pas de doublon
+            tools = [t for t in tools if t["name"] not in ("recherche_web", "lire_page")]
+        tools += (TOOL_SCHEMAS_CERVEAU if cerveau_ok else []) + (SERVER_TOOLS if web_serveur else [])
         if persona == "caro":  # Caro consulte, elle ne modifie rien
             tools = [t for t in tools if t["name"] in OUTILS_LECTURE]
         return tools
 
     def _create(self, messages: list[dict], persona: str):
         opts = self.options()
-        kwargs: dict = dict(
-            model=self.settings.model,
-            max_tokens=16000,
-            system=self._system(persona),
-            tools=self.outils(persona),
-            messages=messages,
-            thinking={"type": "adaptive"},
-            output_config={"effort": opts["effort"]},
-            cache_control={"type": "ephemeral"},
-        )
-        if self.settings.fallbacks:
-            # Si le modèle refuse une requête par erreur, l'API la relance sur un modèle de secours.
-            kwargs["betas"] = ["server-side-fallback-2026-07-01"]
-            kwargs["fallbacks"] = "default"
         try:
-            response = self.client.beta.messages.create(**kwargs)
+            response = creer_message(self.client, self.settings, system=self._system(persona), messages=messages,
+                                     tools=self.outils(persona), effort=opts["effort"])
         except Exception as e:
             etat.signaler("claude", False, type(e).__name__)
             raise
-        etat.signaler("claude", True, f"{self.settings.model} · effort {opts['effort']}")
+        etat.signaler("claude", True, f"{self.settings.fournisseur} · {self.settings.model}")
         return response
 
     def specialiste(self, agent: str, demande: str) -> str:
@@ -192,26 +196,39 @@ class Agent:
                   "Réponds en français, de façon concrète et vérifiable : chiffres, noms, dates. "
                   "Cherche sur le web quand l'information doit être récente, et cite tes sources (nom du site). "
                   "Dis clairement ce qui est incertain. Pas de conseil d'achat ou de vente financier.")
-        tools = SERVER_TOOLS if opts["enable_web"] else []
+        if not opts["enable_web"]:
+            tools: list[dict] = []
+        elif self.settings.fournisseur == "anthropic":
+            tools = SERVER_TOOLS
+        else:
+            tools = [t for t in TOOL_SCHEMAS if t["name"] in ("recherche_web", "lire_page")]
         messages: list[dict] = [{"role": "user", "content": demande}]
         textes: list[str] = []
-        for _ in range(4):  # pause_turn possible pendant une recherche web longue
-            kwargs: dict = dict(model=self.settings.model, max_tokens=8000, system=system, messages=messages,
-                                thinking={"type": "adaptive"}, output_config={"effort": "low"})
-            if tools:
-                kwargs["tools"] = tools
-            if self.settings.fallbacks:
-                kwargs["betas"] = ["server-side-fallback-2026-07-01"]
-                kwargs["fallbacks"] = "default"
-            r = self.client.beta.messages.create(**kwargs)
-            if r.stop_reason == "refusal":
-                return f"{nom} ne peut pas traiter cette demande."
-            if t := _final_text(r.content):
-                textes.append(t)
-            if r.stop_reason != "pause_turn":
-                break
-            messages.append({"role": "assistant", "content": _dump(r.content)})
-        return "\n".join(textes) or f"{nom} n'a rien trouvé."
+        ctx = ToolContext(self.store, self.settings.timezone, searxng_url=self.settings.searxng_url,
+                          lecture_seule=True)
+        try:
+            for _ in range(6):
+                r = creer_message(self.client, self.settings, system=system, messages=messages, tools=tools,
+                                  effort="low", max_tokens=8000, cache=False)
+                if r.stop_reason == "refusal":
+                    return f"{nom} ne peut pas traiter cette demande."
+                if t := _final_text(r.content):
+                    textes.append(t)
+                if r.stop_reason not in ("pause_turn", "tool_use"):
+                    break
+                messages.append({"role": "assistant", "content": _dump(r.content)})
+                if r.stop_reason == "tool_use":
+                    resultats = []
+                    for b in r.content:
+                        if b.type == "tool_use":
+                            contenu, err = run_tool(ctx, b.name, b.input) if b.name in ("recherche_web", "lire_page") \
+                                else ("Outil non disponible pour un spécialiste.", True)
+                            resultats.append({"type": "tool_result", "tool_use_id": b.id, "content": contenu,
+                                              "is_error": err})
+                    messages.append({"role": "user", "content": resultats})
+        finally:
+            ctx.http.close()
+        return (textes[-1] if textes else "") or f"{nom} n'a rien trouvé."
 
     def ask(self, text: str, session_id: str = "iphone",
             on_event: Callable[[dict], None] | None = None, persona: str = "cortana") -> AgentReply:
@@ -233,7 +250,8 @@ class Agent:
         history = self.store.load_session(session_id, self.settings.session_ttl_hours)
         messages = history + [{"role": "user", "content": text}]
         ctx = ToolContext(self.store, self.settings.timezone, cerveau=self.cerveau, cles=self.cles,
-                          specialiste=self.specialiste, lecture_seule=(persona == "caro"))
+                          specialiste=self.specialiste, lecture_seule=(persona == "caro"),
+                          atelier=self.atelier, searxng_url=self.settings.searxng_url)
         texts: list[str] = []
 
         try:
