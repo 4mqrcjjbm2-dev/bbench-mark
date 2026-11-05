@@ -9,6 +9,9 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from . import etat
+from .backtest import STRATEGIES, BacktestErreur, Parametres, executer, recuperer_prix
+from .cerveau import Cerveau, CerveauErreur
 from .storage import JsonStore
 
 COINGECKO = "https://api.coingecko.com/api/v3"
@@ -21,10 +24,12 @@ class ToolError(Exception):
 class ToolContext:
     """État partagé pendant une requête : stockage + action à exécuter sur l'iPhone."""
 
-    def __init__(self, store: JsonStore, timezone: str, http: httpx.Client | None = None) -> None:
+    def __init__(self, store: JsonStore, timezone: str, http: httpx.Client | None = None,
+                 cerveau: Cerveau | None = None) -> None:
         self.store = store
         self.timezone = timezone
-        self.http = http or httpx.Client(timeout=15)
+        self.http = http or httpx.Client(timeout=20)
+        self.cerveau = cerveau
         self.iphone_action: dict | None = None
 
 
@@ -52,6 +57,7 @@ def prix_crypto(ctx: ToolContext, args: dict) -> str:
         },
     )
     r.raise_for_status()
+    etat.signaler("coingecko", True, "Prix récupérés")
     data = r.json()
     if not data:
         raise ToolError("Aucune crypto trouvée. Utilise les identifiants CoinGecko (ex: bitcoin, ethereum, solana).")
@@ -61,6 +67,7 @@ def prix_crypto(ctx: ToolContext, args: dict) -> str:
 def marche_crypto(ctx: ToolContext, args: dict) -> str:
     r = ctx.http.get(f"{COINGECKO}/global")
     r.raise_for_status()
+    etat.signaler("coingecko", True, "Marché récupéré")
     d = r.json()["data"]
     resume = {
         "capitalisation_totale_usd": d["total_market_cap"].get("usd"),
@@ -135,6 +142,73 @@ def action_iphone(ctx: ToolContext, args: dict) -> str:
         "date": args.get("date") or "",
     }
     return "Action programmée : l'iPhone l'exécutera à la réception de ta réponse."
+
+
+# --- Backtests ------------------------------------------------------------------
+
+def lancer_backtest(ctx: ToolContext, args: dict) -> dict:
+    """Utilisé par l'outil et par le tableau de bord. Retourne le résultat complet."""
+    actif = str(_req(args, "actif")).strip().lower()
+    devise = (args.get("devise") or "eur").lower()
+    jours = int(args.get("jours") or 365)
+    if not 90 <= jours <= 365:
+        raise ToolError("La période doit être entre 90 et 365 jours.")
+    p = Parametres(
+        strategie=args.get("strategie") or "tendance",
+        stop_pct=float(args.get("stop_pct") or 5),
+        frais_pct=float(args.get("frais_pct") if args.get("frais_pct") is not None else 0.2),
+        rapide=args.get("rapide"), lente=args.get("lente"), bas=args.get("bas"), haut=args.get("haut"),
+    )
+    if not 0.5 <= p.stop_pct <= 50:
+        raise ToolError("Le stop doit être entre 0,5 % et 50 %.")
+    try:
+        prix = recuperer_prix(ctx.http, actif, devise, jours)
+        etat.signaler("coingecko", True, "Historique récupéré")
+        res = executer(prix, p)
+    except BacktestErreur as e:
+        raise ToolError(str(e)) from e
+    res.update(actif=actif, devise=devise)
+    return ctx.store.add_item("backtests", cap=30, **res)
+
+
+def backtest(ctx: ToolContext, args: dict) -> str:
+    res = lancer_backtest(ctx, args)
+    resume = {k: v for k, v in res.items() if k not in ("courbe", "courbe_buy_hold")}
+    return json.dumps(resume, ensure_ascii=False)
+
+
+# --- Mémoire du Cerveau -----------------------------------------------------------
+
+def _cerveau(ctx: ToolContext) -> Cerveau:
+    if not ctx.cerveau or not ctx.cerveau.disponible:
+        raise ToolError("Mémoire du Cerveau non connectée (AGENT_CERVEAU_DIR).")
+    return ctx.cerveau
+
+
+def memoire_lire(ctx: ToolContext, args: dict) -> str:
+    try:
+        return _cerveau(ctx).lire(_req(args, "fichier"))
+    except CerveauErreur as e:
+        raise ToolError(str(e)) from e
+
+
+def memoire_journal(ctx: ToolContext, args: dict) -> str:
+    return _cerveau(ctx).noter_journal(_req(args, "titre"), _req(args, "tache"), _req(args, "resultat"),
+                                       args.get("lecon") or "aucune")
+
+
+def memoire_lecon(ctx: ToolContext, args: dict) -> str:
+    return _cerveau(ctx).ajouter_lecon(_req(args, "categorie"), _req(args, "ce_qui_sest_passe"),
+                                       _req(args, "pourquoi"), _req(args, "regle"))
+
+
+def memoire_prediction(ctx: ToolContext, args: dict) -> str:
+    try:
+        return _cerveau(ctx).enregistrer_prediction(_req(args, "actif"), _req(args, "prix"),
+                                                    _req(args, "prediction"), _req(args, "raison"),
+                                                    _req(args, "echeance"))
+    except CerveauErreur as e:
+        raise ToolError(str(e)) from e
 
 
 # --- Déclarations envoyées à l'API ------------------------------------------------
@@ -244,10 +318,91 @@ TOOLS: list[tuple[dict, Callable[[ToolContext, dict], str]]] = [
         },
         action_iphone,
     ),
+    (
+        {
+            "name": "backtest",
+            "description": (
+                "Teste une stratégie de trading sur l'historique quotidien d'une crypto (90 à 365 jours). "
+                "Simulation uniquement. Rapporte toujours le résultat ET la pire chute, le taux de réussite "
+                "et la comparaison avec « acheter et garder ». Stratégies : "
+                + "; ".join(f"{k} = {v['regle']}" for k, v in STRATEGIES.items())
+            ),
+            "input_schema": _obj(
+                {
+                    "actif": {"type": "string", "description": "Identifiant CoinGecko, ex: bitcoin."},
+                    "strategie": {"type": "string", "enum": list(STRATEGIES)},
+                    "jours": {"type": "integer", "description": "90 à 365. Défaut 365."},
+                    "stop_pct": {"type": "number", "description": "Stop-loss en %. Défaut 5."},
+                    "frais_pct": {"type": "number", "description": "Frais par ordre en %. Défaut 0,2."},
+                    "rapide": {"type": "integer", "description": "MM rapide (tendance, croisement_mm)."},
+                    "lente": {"type": "integer", "description": "MM lente (tendance, croisement_mm)."},
+                    "bas": {"type": "number", "description": "Seuil RSI d'entrée (rsi)."},
+                    "haut": {"type": "number", "description": "Seuil RSI de sortie (rsi)."},
+                    "devise": {"type": "string"},
+                },
+                ["actif"],
+            ),
+        },
+        backtest,
+    ),
+]
+
+TOOLS_CERVEAU: list[tuple[dict, Callable[[ToolContext, dict], str]]] = [
+    (
+        {
+            "name": "memoire_lire",
+            "description": ("Lit un fichier de la mémoire du Cerveau (chemin relatif à memoire/, ex: "
+                            "predictions.md, connaissances/crypto.md, journal/2026-11.md)."),
+            "input_schema": _obj({"fichier": {"type": "string"}}, ["fichier"]),
+        },
+        memoire_lire,
+    ),
+    (
+        {
+            "name": "memoire_journal",
+            "description": "Note une tâche importante dans le journal du Cerveau (pas pour les petites questions).",
+            "input_schema": _obj(
+                {"titre": {"type": "string"}, "tache": {"type": "string"},
+                 "resultat": {"type": "string", "description": "réussi / partiel / raté + détail court"},
+                 "lecon": {"type": "string", "description": "L-0XX ou « aucune »"}},
+                ["titre", "tache", "resultat"],
+            ),
+        },
+        memoire_journal,
+    ),
+    (
+        {
+            "name": "memoire_lecon",
+            "description": ("Ajoute une leçon quand le propriétaire te corrige ou que tu t'es trompé. "
+                            "Lis d'abord lecons.md : si la leçon existe déjà, ne la duplique pas."),
+            "input_schema": _obj(
+                {"categorie": {"type": "string"}, "ce_qui_sest_passe": {"type": "string"},
+                 "pourquoi": {"type": "string"},
+                 "regle": {"type": "string", "description": "Phrase à l'impératif, applicable telle quelle."}},
+                ["categorie", "ce_qui_sest_passe", "pourquoi", "regle"],
+            ),
+        },
+        memoire_lecon,
+    ),
+    (
+        {
+            "name": "memoire_prediction",
+            "description": ("Enregistre une prédiction de marché pour la vérifier plus tard (mesure de "
+                            "compréhension, jamais un conseil). Récupère d'abord le prix actuel."),
+            "input_schema": _obj(
+                {"actif": {"type": "string"}, "prix": {"type": "string"},
+                 "prediction": {"type": "string", "description": "ex: hausse, baisse, entre X et Y"},
+                 "raison": {"type": "string"}, "echeance": {"type": "string", "description": "AAAA-MM-JJ"}},
+                ["actif", "prix", "prediction", "raison", "echeance"],
+            ),
+        },
+        memoire_prediction,
+    ),
 ]
 
 TOOL_SCHEMAS = [schema for schema, _ in TOOLS]
-HANDLERS = {schema["name"]: fn for schema, fn in TOOLS}
+TOOL_SCHEMAS_CERVEAU = [schema for schema, _ in TOOLS_CERVEAU]
+HANDLERS = {schema["name"]: fn for schema, fn in TOOLS + TOOLS_CERVEAU}
 
 SERVER_TOOLS = [
     {"type": "web_search_20260209", "name": "web_search", "max_uses": 5},
@@ -265,6 +420,8 @@ def run_tool(ctx: ToolContext, name: str, args: dict) -> tuple[str, bool]:
     except ToolError as e:
         return str(e), True
     except httpx.HTTPError as e:
+        if "coingecko" in str(getattr(getattr(e, "request", None), "url", "")):
+            etat.signaler("coingecko", False, str(e))
         return f"Erreur réseau : {e}", True
 
 
@@ -295,8 +452,36 @@ CAPACITES = [
      "description": "Chercher l'actualité et lire des pages web (désactivable dans Options).",
      "outils": ["web_search", "web_fetch"],
      "exemples": ["Quelles sont les dernières actus sur le minage ?", "Résume les news Ethereum de la semaine"]},
+    {"categorie": "Trading", "titre": "Backtests",
+     "description": "Tester une stratégie sur 90 à 365 jours d'historique : gain, pire chute, taux de réussite. Simulation uniquement.",
+     "outils": ["backtest"],
+     "exemples": ["Backteste la stratégie tendance sur le bitcoin sur un an", "Compare RSI et tendance sur l'ethereum"]},
+    {"categorie": "Cerveau", "titre": "Mémoire à long terme",
+     "description": "Lit ta doctrine, tes leçons et tes connaissances ; note le journal, les leçons et les prédictions.",
+     "outils": ["memoire_lire", "memoire_journal", "memoire_lecon", "memoire_prediction"],
+     "exemples": ["Quelles leçons as-tu apprises ?", "Note une prédiction sur le BTC pour demain"]},
     {"categorie": "Divers", "titre": "Date et heure",
      "description": "Connaît la date et l'heure dans ton fuseau horaire.",
      "outils": ["date_heure"],
      "exemples": ["Quel jour sommes-nous ?"]},
 ]
+
+
+# --- Les agents de la Blackbox ------------------------------------------------------
+# Jarvis est le chef d'orchestre ; chaque outil appartient à un agent spécialisé.
+AGENTS = [
+    {"id": "analyste", "nom": "Analyste", "role": "Prix et marché crypto", "couleur": "#ffe14d",
+     "outils": ["prix_crypto", "marche_crypto"]},
+    {"id": "quant", "nom": "Quant", "role": "Backtests de stratégies", "couleur": "#b26bff",
+     "outils": ["backtest"]},
+    {"id": "archiviste", "nom": "Archiviste", "role": "Mémoire du Cerveau", "couleur": "#1ce6d7",
+     "outils": ["memoire_lire", "memoire_journal", "memoire_lecon", "memoire_prediction"]},
+    {"id": "eclaireur", "nom": "Éclaireur", "role": "Recherche web", "couleur": "#4da3ff",
+     "outils": ["web_search", "web_fetch"]},
+    {"id": "secretaire", "nom": "Secrétaire", "role": "Tâches, notes, agenda", "couleur": "#c6ff4d",
+     "outils": ["note_ajouter", "notes_lister", "note_supprimer", "tache_ajouter", "taches_lister",
+                "tache_terminer", "date_heure"]},
+    {"id": "operateur", "nom": "Opérateur", "role": "Actions sur l'iPhone", "couleur": "#ff9f43",
+     "outils": ["action_iphone"]},
+]
+AGENT_PAR_OUTIL = {o: a["id"] for a in AGENTS for o in a["outils"]}

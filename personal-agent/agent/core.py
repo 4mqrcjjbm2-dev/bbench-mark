@@ -8,14 +8,16 @@ from typing import Callable
 
 import anthropic
 
+from . import etat
+from .cerveau import Cerveau
 from .config import Settings
 from .storage import JsonStore
-from .tools import SERVER_TOOLS, TOOL_SCHEMAS, ToolContext, run_tool
+from .tools import AGENT_PAR_OUTIL, SERVER_TOOLS, TOOL_SCHEMAS, TOOL_SCHEMAS_CERVEAU, ToolContext, run_tool
 
 log = logging.getLogger("agent")
 
 # Prompt système figé (aucune date/heure dedans) pour profiter du cache de prompt.
-SYSTEM_PROMPT = """Tu es l'agent personnel de l'utilisateur. Il te parle depuis son iPhone, \
+SYSTEM_PROMPT = """Tu es Jarvis, l'agent personnel de l'utilisateur. Il te parle depuis son iPhone, \
 le plus souvent à la voix via Siri, et ta réponse est lue à voix haute.
 
 Règles de réponse :
@@ -31,7 +33,18 @@ Utilise-la seulement quand l'utilisateur demande une action sur son téléphone.
 - Avant de créer un rappel daté, appelle date_heure pour connaître la date du jour.
 
 Finance : donne des données et des explications neutres. Tu ne fais pas de recommandation \
-personnalisée d'achat ou de vente ; rappelle brièvement les risques si on te le demande."""
+personnalisée d'achat ou de vente ; rappelle brièvement les risques si on te le demande.
+Trading : uniquement des backtests (simulation). Tu ne passes jamais d'ordre réel et ne touches \
+à aucun wallet, clé privée ou compte d'échange. Rapporte toujours la pire chute d'un backtest, pas seulement le gain."""
+
+CERVEAU_PROMPT = """Tu es relié au Cerveau, la mémoire à long terme de ton propriétaire (dépôt git). \
+Ci-dessous sa doctrine, son profil et les leçons tirées des erreurs passées : elles passent avant tes habitudes.
+- Si le propriétaire te corrige (« non », « c'est faux »), ajoute une leçon avec memoire_lecon.
+- Après une tâche importante (backtest, analyse, décision), note-la avec memoire_journal. \
+Pas pour les petites questions.
+- Pour les connaissances ou prédictions passées, utilise memoire_lire.
+
+"""
 
 
 @dataclass
@@ -60,6 +73,8 @@ class Agent:
         self.settings = settings
         self.client = client or anthropic.Anthropic()
         self.store = store or JsonStore(settings.data_dir)
+        self.cerveau = Cerveau(settings.cerveau_dir, settings.cerveau_push, settings.timezone) \
+            if settings.cerveau_dir else None
 
     def options(self) -> dict:
         """Réglages modifiables depuis le tableau de bord (sinon valeurs du .env)."""
@@ -84,13 +99,22 @@ class Agent:
         self.store.set_options(**changes)
         return self.options()
 
+    def _system(self) -> list[dict]:
+        blocs = [{"type": "text", "text": SYSTEM_PROMPT}]
+        if self.cerveau and self.cerveau.disponible:
+            self.cerveau.synchroniser()
+            blocs.append({"type": "text", "text": CERVEAU_PROMPT + self.cerveau.contexte()})
+        return blocs
+
     def _create(self, messages: list[dict]):
         opts = self.options()
+        cerveau_ok = bool(self.cerveau and self.cerveau.disponible)
         kwargs: dict = dict(
             model=self.settings.model,
             max_tokens=16000,
-            system=SYSTEM_PROMPT,
-            tools=TOOL_SCHEMAS + (SERVER_TOOLS if opts["enable_web"] else []),
+            system=self._system(),
+            tools=TOOL_SCHEMAS + (TOOL_SCHEMAS_CERVEAU if cerveau_ok else [])
+            + (SERVER_TOOLS if opts["enable_web"] else []),
             messages=messages,
             thinking={"type": "adaptive"},
             output_config={"effort": opts["effort"]},
@@ -100,7 +124,13 @@ class Agent:
             # Si le modèle refuse une requête par erreur, l'API la relance sur un modèle de secours.
             kwargs["betas"] = ["server-side-fallback-2026-07-01"]
             kwargs["fallbacks"] = "default"
-        return self.client.beta.messages.create(**kwargs)
+        try:
+            response = self.client.beta.messages.create(**kwargs)
+        except Exception as e:
+            etat.signaler("claude", False, type(e).__name__)
+            raise
+        etat.signaler("claude", True, f"{self.settings.model} · effort {opts['effort']}")
+        return response
 
     def ask(self, text: str, session_id: str = "iphone",
             on_event: Callable[[dict], None] | None = None) -> AgentReply:
@@ -114,7 +144,7 @@ class Agent:
 
         history = self.store.load_session(session_id, self.settings.session_ttl_hours)
         messages = history + [{"role": "user", "content": text}]
-        ctx = ToolContext(self.store, self.settings.timezone)
+        ctx = ToolContext(self.store, self.settings.timezone, cerveau=self.cerveau)
         texts: list[str] = []
 
         try:
@@ -131,7 +161,8 @@ class Agent:
                     texts.append(t)
                 for block in response.content:
                     if block.type == "server_tool_use":  # recherche / lecture web côté Anthropic
-                        emit({"outil": block.name, "entree": block.input, "erreur": False, "resultat": ""})
+                        emit({"outil": block.name, "agent": AGENT_PAR_OUTIL.get(block.name, "jarvis"),
+                              "entree": block.input, "erreur": False, "resultat": ""})
 
                 if stop == "pause_turn":  # recherche web longue : on relance pour continuer
                     continue
@@ -143,8 +174,8 @@ class Agent:
                     if block.type == "tool_use":
                         log.info("outil %s %s", block.name, block.input)
                         content, is_error = run_tool(ctx, block.name, block.input)
-                        emit({"outil": block.name, "entree": block.input, "erreur": is_error,
-                              "resultat": content[:300]})
+                        emit({"outil": block.name, "agent": AGENT_PAR_OUTIL.get(block.name, "jarvis"),
+                              "entree": block.input, "erreur": is_error, "resultat": content[:300]})
                         results.append({"type": "tool_result", "tool_use_id": block.id,
                                         "content": content, "is_error": is_error})
                 messages.append({"role": "user", "content": results})

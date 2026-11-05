@@ -36,12 +36,12 @@ class JsonStore:
     def _list_path(self, name: str) -> Path:
         return self.data_dir / f"{name}.json"
 
-    def add_item(self, name: str, **fields: Any) -> dict:
+    def add_item(self, name: str, cap: int | None = None, **fields: Any) -> dict:
         with _lock:
             items = self._read(self._list_path(name), [])
             item = {"id": uuid.uuid4().hex[:6], "cree_le": time.strftime("%Y-%m-%d %H:%M"), **fields}
             items.append(item)
-            self._write(self._list_path(name), items)
+            self._write(self._list_path(name), items[-cap:] if cap else items)
             return item
 
     def list_items(self, name: str) -> list[dict]:

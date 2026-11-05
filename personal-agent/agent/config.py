@@ -34,6 +34,8 @@ class Settings:
     max_tool_rounds: int
     enable_web: bool
     fallbacks: bool
+    cerveau_dir: Path | None
+    cerveau_push: bool
 
 
 def load_settings() -> Settings:
@@ -47,4 +49,6 @@ def load_settings() -> Settings:
         max_tool_rounds=int(os.environ.get("AGENT_MAX_TOOL_ROUNDS", "12")),
         enable_web=os.environ.get("AGENT_ENABLE_WEB", "1") != "0",
         fallbacks=os.environ.get("AGENT_FALLBACKS", "1") != "0",
+        cerveau_dir=Path(os.environ["AGENT_CERVEAU_DIR"]).expanduser() if os.environ.get("AGENT_CERVEAU_DIR") else None,
+        cerveau_push=os.environ.get("AGENT_CERVEAU_PUSH", "1") != "0",
     )
