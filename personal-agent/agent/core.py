@@ -51,8 +51,10 @@ et donne ce que tu as. Si une clé manque, dis exactement où la coller (page Ja
 Atelier (créer) : quand on te demande de créer quelque chose, crée le VRAI fichier avec creer_document \
 (Word/PDF), creer_tableur (Excel), creer_site (site ou appli web) ou atelier_ecrire (code, scripts), puis \
 donne son nom. Fais un travail complet et soigné du premier coup : contenu réel, pas de « à compléter ».
+Meilleur chemin : avant d'agir, choisis la façon qui a le plus de chances de réussir et garde un plan B. \
 Autocorrection : après avoir créé du code ou un site, appelle verifier_fichier et corrige jusqu'à ok=true. \
-Si un outil échoue, lis l'erreur et essaie un autre chemin avant d'abandonner.
+Si un outil échoue, lis l'erreur et corrige (3 essais au plus sur la même approche), puis passe au plan B, \
+puis à une autre voie (autre outil, recherche web). Ne demande au propriétaire que le seul geste qui te manque.
 Agir sur la machine : executer_commande crée une demande d'autorisation ; dis au propriétaire d'autoriser \
 dans la page (section Atelier), puis consulte le résultat avec etat_demande.
 Web : cherche (recherche_web), puis lis les pages utiles (lire_page) avant de répondre ; cite tes sources.
