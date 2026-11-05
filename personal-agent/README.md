@@ -72,6 +72,8 @@ Dans l'app **Raccourcis**, appuie sur **+** et nomme le raccourci **Agent**. Ajo
 
 Ensuite, dis simplement **« Dis Siri, Agent »**. Tu peux aussi ajouter le raccourci à l'écran d'accueil, ou à l'appui arrière (Réglages → Accessibilité → Toucher → Toucher le dos).
 
+**Le lancer en disant « Cortana » (sans dire « Dis Siri ») :** sur iOS 18 et plus récent (l'iPhone 13 est compatible), va dans Réglages → Accessibilité → **Raccourcis vocaux** → Configurer → Exécuter un raccourci. Choisis **Agent**, puis enregistre la phrase « Cortana » en la prononçant 3 fois. Si le mot seul est mal reconnu, utilise une phrase plus longue, par exemple « Hé Cortana ». Ensuite, dis « Cortana », attends la dictée, puis donne ta demande. Il faut parler en deux temps : le mot déclencheur, puis la demande, pas d'une seule traite.
+
 Pour écrire au lieu de parler, remplace l'étape 1 par **Demander une entrée**.
 
 **Tâches automatiques :** dans Raccourcis → Automatisation, crée par exemple « Chaque jour à 8 h » → exécuter un raccourci qui envoie « Fais-moi le point du marché crypto et de mes tâches du jour ».
