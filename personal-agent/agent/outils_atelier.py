@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from typing import Callable
 
-from . import web
+import xml.etree.ElementTree as ET
+
+from . import savoir, web
 from .atelier import AtelierErreur
 
 
@@ -43,6 +45,42 @@ def lire_page(ctx, args: dict) -> str:
         return web.lire(ctx.http, str(args.get("url") or ""))
     except web.WebErreur as e:
         raise ActionErreur(str(e)) from e
+
+
+def encyclopedie(ctx, args: dict) -> str:
+    """Cherche dans Wikipédia hors ligne et renvoie directement le meilleur article (un seul appel = moins de tokens)."""
+    q = str(args.get("requete") or "").strip()
+    if not q:
+        raise ActionErreur("Paramètre 'requete' manquant.")
+    try:
+        res = savoir.chercher(ctx.http, getattr(ctx, "kiwix_url", ""), q, str(args.get("langue") or "fra"))
+    except savoir.SavoirErreur as e:
+        raise ActionErreur(str(e)) from e
+    if not res:
+        return "Rien trouvé dans l'encyclopédie hors ligne. Essaie un mot plus simple ou le nom exact."
+    meilleur = res[0]
+    try:
+        texte = savoir.lire(ctx.http, meilleur["url"], int(args.get("longueur") or 4000))
+    except Exception as e:  # noqa: BLE001
+        texte = f"(article illisible : {e})"
+    autres = "; ".join(f"{r['titre']} ({r['source']})" for r in res[1:6])
+    return f"[{meilleur['source']}] {meilleur['titre']}\n{texte}\n\nAutres résultats : {autres or 'aucun'}"
+
+
+def creer_image_svg(ctx, args: dict) -> str:
+    _ecriture_permise(ctx)
+    svg = str(args.get("svg") or "").strip()
+    try:
+        racine = ET.fromstring(svg)
+    except ET.ParseError as e:
+        raise ActionErreur(f"SVG invalide, corrige-le : {e}") from e
+    if not racine.tag.endswith("svg"):
+        raise ActionErreur("Le contenu doit commencer par une balise <svg>.")
+    if "xmlns" not in svg[:300]:
+        svg = svg.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"', 1)
+    a = _atelier(ctx)
+    rel = a.ecrire(f"images/{a.nom_fichier(str(args.get('nom') or ''), 'image')}.svg", svg)
+    return f"Image créée : {rel} (lien : {_lien(rel)})."
 
 
 def atelier_ecrire(ctx, args: dict) -> str:
@@ -126,6 +164,13 @@ OUTILS_ATELIER: list[tuple[dict, Callable]] = [
       "input_schema": _obj({"requete": S, "nombre": {"type": "integer"}}, ["requete"])}, recherche_web),
     ({"name": "lire_page", "description": "Lit le texte d'une page web publique (adresse http/https).",
       "input_schema": _obj({"url": S}, ["url"])}, lire_page),
+    ({"name": "encyclopedie", "description": "Wikipédia et encyclopédies HORS LIGNE (Kiwix) : cherche et renvoie "
+      "directement le meilleur article. À préférer pour les faits stables (histoire, science, lieux, définitions).",
+      "input_schema": _obj({"requete": S, "langue": {"type": "string", "description": "fra, eng…"},
+                            "longueur": {"type": "integer"}}, ["requete"])}, encyclopedie),
+    ({"name": "creer_image_svg", "description": "Crée une image vectorielle SVG (logo, icône, illustration, schéma, "
+      "animation CSS ou SMIL) dans l'atelier. Fonctionne hors ligne.",
+      "input_schema": _obj({"nom": S, "svg": S}, ["svg"])}, creer_image_svg),
     ({"name": "creer_document", "description": "Crée un vrai document Word (docx), PDF ou Markdown dans l'atelier. "
       "contenu en Markdown simple : # titres, - puces, 1. listes, **gras**.",
       "input_schema": _obj({"nom": S, "titre": S, "contenu": S,

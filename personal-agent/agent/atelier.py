@@ -19,7 +19,7 @@ from pathlib import Path
 
 logging.getLogger("fontTools").setLevel(logging.WARNING)  # la bibliothèque PDF est très bavarde
 
-DOSSIERS = {"documents", "tableurs", "sites", "code", "fichiers"}
+DOSSIERS = {"documents", "tableurs", "sites", "code", "fichiers", "images"}
 # Polices Unicode libres (accents, €, emoji non) : installées dans l'image Docker (fonts-dejavu-core).
 POLICES = [("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
            ("/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"),

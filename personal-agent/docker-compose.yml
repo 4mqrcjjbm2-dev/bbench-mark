@@ -9,6 +9,7 @@ services:
       SEARXNG_URL: http://searxng:8080
       AGENT_DATA_DIR: /data
       AGENT_ATELIER: /atelier
+      KIWIX_URL: ${KIWIX_URL:-}  # rempli par deploy/telecharger-savoir.sh
     volumes:
       - ./data:/data            # tâches, notes, activité, clés (coffre)
       - ./atelier:/atelier      # tout ce que Jarvis crée
@@ -39,6 +40,15 @@ services:
       SEARXNG_SECRET: ${SEARXNG_SECRET}
     volumes:
       - ./deploy/searxng:/etc/searxng
+    restart: unless-stopped
+
+  # Le Savoir hors ligne : Wikipédia & co (fichiers .zim). Démarré par deploy/telecharger-savoir.sh.
+  kiwix:
+    image: ghcr.io/kiwix/kiwix-serve:latest
+    command: ["*.zim"]
+    volumes:
+      - ./zim:/data
+    profiles: ["savoir"]
     restart: unless-stopped
 
 volumes:

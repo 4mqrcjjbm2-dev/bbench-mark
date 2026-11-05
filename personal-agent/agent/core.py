@@ -12,6 +12,7 @@ from . import etat
 from .agents_outils import SPECIALISTES
 from .atelier import Atelier
 from .llm import creer_client, creer_message, tokens
+from .reseau import OUTILS_INTERNET, en_ligne
 from .cerveau import Cerveau
 from .cles import Cles
 from .config import Settings
@@ -57,7 +58,9 @@ Si un outil échoue, lis l'erreur et corrige (3 essais au plus sur la même appr
 puis à une autre voie (autre outil, recherche web). Ne demande au propriétaire que le seul geste qui te manque.
 Agir sur la machine : executer_commande crée une demande d'autorisation ; dis au propriétaire d'autoriser \
 dans la page (section Atelier), puis consulte le résultat avec etat_demande.
-Web : cherche (recherche_web), puis lis les pages utiles (lire_page) avant de répondre ; cite tes sources.
+Savoir : pour un fait stable (histoire, science, lieux, définitions), utilise d'abord encyclopedie (hors ligne, \
+rapide, gratuit) ; le web (recherche_web puis lire_page) seulement pour l'actualité ou si l'encyclopédie ne suffit \
+pas. Cite tes sources.
 
 Finance : donne des données et des explications neutres. Tu ne fais pas de recommandation \
 personnalisée d'achat ou de vente ; rappelle brièvement les risques si on te le demande.
@@ -178,6 +181,11 @@ class Agent:
         if web_serveur:  # Claude a sa propre recherche web : pas de doublon
             tools = [t for t in tools if t["name"] not in ("recherche_web", "lire_page")]
         tools += (TOOL_SCHEMAS_CERVEAU if cerveau_ok else []) + (SERVER_TOOLS if web_serveur else [])
+        if not self.settings.kiwix_url:
+            tools = [t for t in tools if t["name"] != "encyclopedie"]
+        if self.settings.fournisseur == "ollama" and not en_ligne():
+            # Hors ligne : on ne décrit même pas au modèle les outils qui ont besoin d'Internet.
+            tools = [t for t in tools if t["name"] not in OUTILS_INTERNET]
         if persona == "caro":  # Caro consulte, elle ne modifie rien
             tools = [t for t in tools if t["name"] in OUTILS_LECTURE]
         return tools
@@ -281,7 +289,8 @@ class Agent:
         self._tokens_specialistes = {"entree": 0, "sortie": 0}
         ctx = ToolContext(self.store, self.settings.timezone, cerveau=self.cerveau, cles=self.cles,
                           specialiste=self.specialiste, lecture_seule=(persona == "caro"),
-                          atelier=self.atelier, searxng_url=self.settings.searxng_url)
+                          atelier=self.atelier, searxng_url=self.settings.searxng_url,
+                          kiwix_url=self.settings.kiwix_url)
         texts: list[str] = []
 
         try:

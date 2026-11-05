@@ -42,6 +42,7 @@ class Settings:
     atelier_dir: Path         # le dossier de création de Jarvis
     modele_leger: str         # modèle plus petit pour Caro et les spécialistes ("" = le même)
     historique_max: int       # messages gardés en contexte avec Ollama (vitesse, énergie)
+    kiwix_url: str            # Wikipédia hors ligne (kiwix-serve) ; vide = pas installé
 
 
 def load_settings() -> Settings:
@@ -64,4 +65,5 @@ def load_settings() -> Settings:
         atelier_dir=Path(os.environ.get("AGENT_ATELIER", Path.home() / "Jarvis")).expanduser(),
         modele_leger=os.environ.get("AGENT_MODELE_LEGER", ""),
         historique_max=int(os.environ.get("AGENT_HISTORIQUE_MAX", "24")),
+        kiwix_url=os.environ.get("KIWIX_URL", "").rstrip("/"),
     )

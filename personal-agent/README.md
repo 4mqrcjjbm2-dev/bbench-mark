@@ -34,6 +34,19 @@ Le script fait tout le reste :
 
 Les petits modèles libres se trompent plus souvent que les grands. Si un résultat ne te convient pas, prends un modèle plus gros.
 
+### Le Savoir hors ligne (Wikipédia sans Internet)
+
+```bash
+./deploy/telecharger-savoir.sh moyen              # Wikipédia française, articles complets sans images
+./deploy/telecharger-savoir.sh moyen wiktionnaire # + le Wiktionnaire
+```
+
+Le script trouve la dernière version sur download.kiwix.org, affiche sa taille et la télécharge. Si la connexion coupe, relance-le : il reprend là où il s'était arrêté. Il démarre ensuite Kiwix (open source). Jarvis consulte alors l'encyclopédie **sans Internet**, avec l'outil `encyclopedie`.
+
+**Sans Internet, Jarvis passe tout seul en mode hors ligne.** Il garde l'IA locale, l'Atelier, la mémoire et Wikipédia, et met de côté ce qui demande Internet.
+
+Sur l'iPhone lui-même, l'app gratuite **Kiwix** lit les mêmes fichiers Wikipédia hors ligne, même sans le serveur.
+
 ### L'Atelier : ce que Jarvis crée pour vrai
 
 Dis à Cortana « Crée mon CV en PDF », « Fais un budget Excel », « Crée un site pour mon garage » ou « Écris un script qui trie mes fichiers ». Elle fabrique le **vrai fichier** dans l'atelier (`./atelier` sur le serveur), et tu le retrouves dans la section **Atelier** de la page : ouvrir, télécharger, aperçu des sites, supprimer.
@@ -43,6 +56,7 @@ Dis à Cortana « Crée mon CV en PDF », « Fais un budget Excel », « Crée u
 | Lettres, CV, guides | `creer_document` | Word (.docx), PDF, Markdown |
 | Budgets, inventaires | `creer_tableur` | Excel (.xlsx), avec formules et totaux |
 | Sites, applis web | `creer_site` | HTML, CSS et JS, vérifiés automatiquement, aperçu dans la page |
+| Images, logos, animations | `creer_image_svg` | SVG vérifié, hors ligne |
 | Code, scripts | `atelier_ecrire` puis `verifier_fichier` | Python, JS, JSON… vérifiés et corrigés jusqu'à ce que ça passe |
 | Recherche | `recherche_web` puis `lire_page` | Sources lues et citées |
 
