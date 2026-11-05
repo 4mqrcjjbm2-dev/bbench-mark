@@ -25,7 +25,10 @@ from . import etat
 from .backtest import STRATEGIES
 from .config import load_settings
 from .core import EFFORTS, Agent
-from .tools import AGENTS, CAPACITES, ToolContext, ToolError, lancer_backtest
+from typing import Literal
+
+from .catalogue import CARO_CATALOGUE, GROUPES, PERSONAS, agents_pour_page
+from .tools import CAPACITES, ToolContext, ToolError, lancer_backtest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 settings = load_settings()
@@ -66,6 +69,7 @@ class AskIn(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     session: str = Field(default="iphone", max_length=64)
     source: str = Field(default="iphone", max_length=20)
+    persona: Literal["cortana", "caro"] = "cortana"
 
 
 class AskOut(BaseModel):
@@ -124,7 +128,7 @@ def ask(body: AskIn) -> AskOut:
         return AskOut(reply="D'accord, nouvelle conversation.")
 
     store = agent.store
-    act_id = store.activity_start(text, body.source)
+    act_id = store.activity_start(text, body.source, persona=body.persona)
 
     def fail(message: str) -> AskOut:
         store.activity_update(act_id, statut="erreur", reponse=message, fin=time.time())
@@ -132,7 +136,7 @@ def ask(body: AskIn) -> AskOut:
 
     with _session_locks[body.session]:
         try:
-            result = agent.ask(text, body.session,
+            result = agent.ask(text, body.session, persona=body.persona,
                                on_event=lambda e: store.activity_update(act_id, etape=e))
         except anthropic.RateLimitError:
             return fail("Trop de demandes en ce moment, réessaie dans une minute.")
@@ -246,7 +250,10 @@ def state() -> dict:
     cerveau = _en_cache("cerveau", 10, lambda: agent.cerveau.resume() if agent.cerveau else {"disponible": False})
     return {
         "activite": activite,
-        "agents": AGENTS,
+        "agents": agents_pour_page(),
+        "personas": list(PERSONAS.values()),
+        "groupes": GROUPES,
+        "caro_catalogue": CARO_CATALOGUE,
         "taches": agent.store.list_items("taches"),
         "notes": agent.store.list_items("notes")[::-1],
         "backtests": agent.store.list_items("backtests")[::-1][:12],
@@ -265,8 +272,8 @@ def backtest_lancer(body: BacktestIn) -> dict:
     agent = get_agent()
     store = agent.store
     nom = STRATEGIES.get(body.strategie, {}).get("nom", body.strategie)
-    act_id = store.activity_start(f"Backtest {nom} sur {body.actif} ({body.jours} j)", "web")
-    store.activity_update(act_id, etape={"outil": "backtest", "agent": "quant", "entree": body.model_dump(),
+    act_id = store.activity_start(f"Backtest {nom} sur {body.actif} ({body.jours} j)", "web", persona="cortana")
+    store.activity_update(act_id, etape={"outil": "backtest", "agent": "sol_paper", "entree": body.model_dump(),
                                          "erreur": False, "resultat": ""})
     ctx = ToolContext(store, settings.timezone, cerveau=agent.cerveau)
     try:

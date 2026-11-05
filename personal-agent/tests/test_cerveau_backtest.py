@@ -113,7 +113,8 @@ def test_backtest_depuis_le_tableau_de_bord(tmp_path, monkeypatch):
     assert r.status_code == 200 and r.json()["jours"] == 180
     st = c.get("/api/state", headers=H).json()
     assert st["backtests"][0]["actif"] == "bitcoin"
-    assert st["activite"][0]["etapes"][0]["agent"] == "quant"
-    assert {a["id"] for a in st["agents"]} >= {"analyste", "quant", "archiviste"}
+    assert st["activite"][0]["etapes"][0]["agent"] == "sol_paper"
+    assert len(st["agents"]) == 24 and {p["id"] for p in st["personas"]} == {"cortana", "caro"}
+    assert {"nexus", "pulse", "aegis", "rig", "neon", "tao"} <= {a["id"] for a in st["agents"]}
     assert {x["id"] for x in st["connexions"]} == {"claude", "coingecko", "web", "memoire", "iphone"}
     assert c.post("/api/backtests", json={"actif": "bitcoin", "jours": 30}, headers=H).status_code == 422

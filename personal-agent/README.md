@@ -1,6 +1,20 @@
 # Jarvis — agent personnel pour iPhone
 
-Jarvis réunit sur une seule page : **la Blackbox** (la salle animée où l'on voit les agents travailler, avec le tableau des tâches en cours), **le Cerveau** (ta mémoire `cerveaux-`), **les backtests**, tes tâches et notes, et **toutes les connexions**.
+**Jarvis, c'est l'écosystème au complet.** On lui parle par deux voix :
+- **Cortana exécute** les tâches avec l'application. Elle a tous les outils : crypto, backtests, mémoire, tâches, notes, rappels, actions iPhone.
+- **Caro explique** l'application : les sections, les agents du Catalogue, ce qui est livré ou à bâtir. Elle consulte, mais ne modifie rien. Si on lui demande d'agir, elle renvoie vers Cortana, et un garde-fou dans le code bloque toute écriture.
+
+Chaque voix a sa propre conversation. Dans la Blackbox, Jarvis est au centre, Cortana et Caro autour du cœur, et **les 24 agents du [Catalogue](https://claude.ai/artifact/BL29NXrEQgE6bRiAY9vN1y)** en cercle, regroupés et colorés par équipe. Un nœud plein veut dire livré, à moitié plein en test ou partiel, en pointillé à bâtir ; le point néon marque un agent branché pour vrai dans Jarvis. Touche un agent pour voir sa fiche. La liste vit dans `agent/catalogue.py`.
+
+| Branché aujourd'hui | Agent | Outils |
+|---|---|---|
+| Prix et marché crypto | PULSE | `prix_crypto`, `marche_crypto` |
+| Backtests | SOL Paper Trader | `backtest` |
+| Mémoire du Cerveau, liste des agents | NEXUS | `memoire_*`, `agents_catalogue` |
+| Recherche web | PRISM | `web_search`, `web_fetch` |
+| Tâches, notes, rappels, actions iPhone | Cortana elle-même | `tache_*`, `note_*`, `date_heure`, `action_iphone` |
+
+Jarvis réunit aussi sur la même page : **la Blackbox** (la salle animée où l'on voit les agents travailler, avec le tableau des tâches en cours), **le Cerveau** (ta mémoire `cerveaux-`), **les backtests**, tes tâches et notes, et **toutes les connexions**.
 
 Tu parles à Siri, ton agent Claude réfléchit, utilise ses outils, puis te répond à voix haute. Il peut aussi faire agir ton iPhone : créer un rappel, ouvrir un lien, copier un texte ou afficher une notification.
 
@@ -72,7 +86,9 @@ Dans l'app **Raccourcis**, appuie sur **+** et nomme le raccourci **Agent**. Ajo
 
 Ensuite, dis simplement **« Dis Siri, Agent »**. Tu peux aussi ajouter le raccourci à l'écran d'accueil, ou à l'appui arrière (Réglages → Accessibilité → Toucher → Toucher le dos).
 
-**Le lancer en disant « Cortana » (sans dire « Dis Siri ») :** sur iOS 18 et plus récent (l'iPhone 13 est compatible), va dans Réglages → Accessibilité → **Raccourcis vocaux** → Configurer → Exécuter un raccourci. Choisis **Agent**, puis enregistre la phrase « Cortana » en la prononçant 3 fois. Si le mot seul est mal reconnu, utilise une phrase plus longue, par exemple « Hé Cortana ». Ensuite, dis « Cortana », attends la dictée, puis donne ta demande. Il faut parler en deux temps : le mot déclencheur, puis la demande, pas d'une seule traite.
+**Deux raccourcis, deux voix.** Duplique le raccourci : appelle le premier **Cortana**, le second **Caro**. Dans le corps JSON, ajoute le champ `persona` (texte) = `cortana` dans le premier et `caro` dans le second.
+
+**Le lancer en disant « Cortana » (sans dire « Dis Siri ») :** sur iOS 18 et plus récent (l'iPhone 13 est compatible), va dans Réglages → Accessibilité → **Raccourcis vocaux** → Configurer → Exécuter un raccourci. Choisis **Agent**, puis enregistre la phrase « Cortana » en la prononçant 3 fois. Si le mot seul est mal reconnu, utilise une phrase plus longue, par exemple « Hé Cortana ». Ensuite, dis « Cortana », attends la dictée, puis donne ta demande. Fais la même chose avec la phrase « Caro » pour le raccourci Caro ; « Dis Siri, Caro » fonctionne aussi. Il faut parler en deux temps : le mot déclencheur, puis la demande, pas d'une seule traite.
 
 Pour écrire au lieu de parler, remplace l'étape 1 par **Demander une entrée**.
 
@@ -142,7 +158,7 @@ La page se rafraîchit toutes les 1,5 s pendant qu'une tâche tourne, sinon tout
 ```http
 POST /ask
 Authorization: Bearer <AGENT_TOKEN>
-{"text": "Prix du bitcoin ?", "session": "iphone"}
+{"text": "Prix du bitcoin ?", "session": "iphone", "persona": "cortana"}   // ou "caro"
 
 → {"reply": "...", "action_type": "aucune|rappel|ouvrir_url|copier|notification",
    "action_texte": "", "action_url": "", "action_date": ""}

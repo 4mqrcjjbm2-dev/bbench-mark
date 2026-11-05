@@ -211,6 +211,11 @@ def memoire_prediction(ctx: ToolContext, args: dict) -> str:
         raise ToolError(str(e)) from e
 
 
+def agents_catalogue(ctx: ToolContext, args: dict) -> str:
+    from .catalogue import resume_catalogue
+    return resume_catalogue()
+
+
 # --- Déclarations envoyées à l'API ------------------------------------------------
 
 def _obj(props: dict, required: list[str]) -> dict:
@@ -296,6 +301,15 @@ TOOLS: list[tuple[dict, Callable[[ToolContext, dict], str]]] = [
             "input_schema": _obj({}, []),
         },
         date_heure,
+    ),
+    (
+        {
+            "name": "agents_catalogue",
+            "description": ("Liste les agents de l'écosystème Jarvis (Catalogue officiel) : rôle, statut "
+                            "(livré, en test, à bâtir) et ce qu'ils font déjà dans Jarvis."),
+            "input_schema": _obj({}, []),
+        },
+        agents_catalogue,
     ),
     (
         {
@@ -460,6 +474,10 @@ CAPACITES = [
      "description": "Lit ta doctrine, tes leçons et tes connaissances ; note le journal, les leçons et les prédictions.",
      "outils": ["memoire_lire", "memoire_journal", "memoire_lecon", "memoire_prediction"],
      "exemples": ["Quelles leçons as-tu apprises ?", "Note une prédiction sur le BTC pour demain"]},
+    {"categorie": "Écosystème", "titre": "Caro t'explique Jarvis",
+     "description": "Choisis Caro pour comprendre l'application : sections, agents du Catalogue, ce qui est livré ou à bâtir.",
+     "outils": ["agents_catalogue"],
+     "exemples": ["Caro, explique-moi la Blackbox", "Quels agents sont déjà livrés ?"]},
     {"categorie": "Divers", "titre": "Date et heure",
      "description": "Connaît la date et l'heure dans ton fuseau horaire.",
      "outils": ["date_heure"],
@@ -467,21 +485,4 @@ CAPACITES = [
 ]
 
 
-# --- Les agents de la Blackbox ------------------------------------------------------
-# Jarvis est le chef d'orchestre ; chaque outil appartient à un agent spécialisé.
-AGENTS = [
-    {"id": "analyste", "nom": "Analyste", "role": "Prix et marché crypto", "couleur": "#ffe14d",
-     "outils": ["prix_crypto", "marche_crypto"]},
-    {"id": "quant", "nom": "Quant", "role": "Backtests de stratégies", "couleur": "#b26bff",
-     "outils": ["backtest"]},
-    {"id": "archiviste", "nom": "Archiviste", "role": "Mémoire du Cerveau", "couleur": "#1ce6d7",
-     "outils": ["memoire_lire", "memoire_journal", "memoire_lecon", "memoire_prediction"]},
-    {"id": "eclaireur", "nom": "Éclaireur", "role": "Recherche web", "couleur": "#4da3ff",
-     "outils": ["web_search", "web_fetch"]},
-    {"id": "secretaire", "nom": "Secrétaire", "role": "Tâches, notes, agenda", "couleur": "#c6ff4d",
-     "outils": ["note_ajouter", "notes_lister", "note_supprimer", "tache_ajouter", "taches_lister",
-                "tache_terminer", "date_heure"]},
-    {"id": "operateur", "nom": "Opérateur", "role": "Actions sur l'iPhone", "couleur": "#ff9f43",
-     "outils": ["action_iphone"]},
-]
-AGENT_PAR_OUTIL = {o: a["id"] for a in AGENTS for o in a["outils"]}
+# Les agents de la Blackbox (catalogue officiel) et le lien outil → agent : voir catalogue.py

@@ -12,13 +12,14 @@ from . import etat
 from .cerveau import Cerveau
 from .config import Settings
 from .storage import JsonStore
-from .tools import AGENT_PAR_OUTIL, SERVER_TOOLS, TOOL_SCHEMAS, TOOL_SCHEMAS_CERVEAU, ToolContext, run_tool
+from .catalogue import AGENT_PAR_OUTIL, GUIDE_APP, OUTILS_LECTURE, PERSONAS, resume_catalogue
+from .tools import SERVER_TOOLS, TOOL_SCHEMAS, TOOL_SCHEMAS_CERVEAU, ToolContext, run_tool
 
 log = logging.getLogger("agent")
 
 # Prompt système figé (aucune date/heure dedans) pour profiter du cache de prompt.
-SYSTEM_PROMPT = """Tu es Jarvis, l'agent personnel de l'utilisateur. Il te parle depuis son iPhone, \
-le plus souvent à la voix via Siri, et ta réponse est lue à voix haute.
+SYSTEM_PROMPT = """Tu fais partie de Jarvis, l'écosystème d'agents personnel de l'utilisateur. Il te parle \
+depuis son iPhone, le plus souvent à la voix, et ta réponse est lue à voix haute.
 
 Règles de réponse :
 - Réponds en français, de façon brève et naturelle à l'oral (1 à 4 phrases), sauf si on te demande du détail.
@@ -36,6 +37,17 @@ Finance : donne des données et des explications neutres. Tu ne fais pas de reco
 personnalisée d'achat ou de vente ; rappelle brièvement les risques si on te le demande.
 Trading : uniquement des backtests (simulation). Tu ne passes jamais d'ordre réel et ne touches \
 à aucun wallet, clé privée ou compte d'échange. Rapporte toujours la pire chute d'un backtest, pas seulement le gain."""
+
+PERSONA_PROMPTS = {
+    "cortana": """Tu es Cortana, la voix qui EXÉCUTE les tâches avec l'application Jarvis. Quand on te demande \
+quelque chose, fais-le avec les outils, puis confirme en une phrase ce qui est fait. Si une demande porte \
+surtout sur le fonctionnement de l'application, réponds brièvement et rappelle que Caro peut tout expliquer.""",
+    "caro": """Tu es Caro, la voix québécoise qui EXPLIQUE l'application Jarvis. Tu aides à comprendre : \
+ce que fait chaque section, chaque agent, où en est chacun, comment s'en servir. Parle simplement, avec \
+chaleur. Tu consultes (prix, tâches, notes, mémoire, catalogue, web) mais tu ne modifies rien : si on te \
+demande d'agir (créer une tâche, un rappel, une note, un backtest, écrire dans la mémoire), explique \
+comment faire et dis de demander à Cortana. Ne prétends jamais qu'un agent « à bâtir » fonctionne déjà.""",
+}
 
 CERVEAU_PROMPT = """Tu es relié au Cerveau, la mémoire à long terme de ton propriétaire (dépôt git). \
 Ci-dessous sa doctrine, son profil et les leçons tirées des erreurs passées : elles passent avant tes habitudes.
@@ -99,22 +111,30 @@ class Agent:
         self.store.set_options(**changes)
         return self.options()
 
-    def _system(self) -> list[dict]:
-        blocs = [{"type": "text", "text": SYSTEM_PROMPT}]
+    def _system(self, persona: str) -> list[dict]:
+        blocs = [{"type": "text", "text": SYSTEM_PROMPT + "\n\n" + PERSONA_PROMPTS[persona]
+                  + "\n\n## L'APPLICATION\n" + GUIDE_APP + "\n\n## LES AGENTS DU CATALOGUE\n" + resume_catalogue()}]
         if self.cerveau and self.cerveau.disponible:
             self.cerveau.synchroniser()
             blocs.append({"type": "text", "text": CERVEAU_PROMPT + self.cerveau.contexte()})
         return blocs
 
-    def _create(self, messages: list[dict]):
+    def outils(self, persona: str) -> list[dict]:
         opts = self.options()
         cerveau_ok = bool(self.cerveau and self.cerveau.disponible)
+        tools = TOOL_SCHEMAS + (TOOL_SCHEMAS_CERVEAU if cerveau_ok else []) \
+            + (SERVER_TOOLS if opts["enable_web"] else [])
+        if persona == "caro":  # Caro consulte, elle ne modifie rien
+            tools = [t for t in tools if t["name"] in OUTILS_LECTURE]
+        return tools
+
+    def _create(self, messages: list[dict], persona: str):
+        opts = self.options()
         kwargs: dict = dict(
             model=self.settings.model,
             max_tokens=16000,
-            system=self._system(),
-            tools=TOOL_SCHEMAS + (TOOL_SCHEMAS_CERVEAU if cerveau_ok else [])
-            + (SERVER_TOOLS if opts["enable_web"] else []),
+            system=self._system(persona),
+            tools=self.outils(persona),
             messages=messages,
             thinking={"type": "adaptive"},
             output_config={"effort": opts["effort"]},
@@ -133,8 +153,15 @@ class Agent:
         return response
 
     def ask(self, text: str, session_id: str = "iphone",
-            on_event: Callable[[dict], None] | None = None) -> AgentReply:
-        """on_event reçoit chaque étape (outil appelé, recherche web) au fil de l'eau."""
+            on_event: Callable[[dict], None] | None = None, persona: str = "cortana") -> AgentReply:
+        """on_event reçoit chaque étape (outil appelé, recherche web) au fil de l'eau.
+
+        Chaque voix a sa propre conversation (prompt système différent), d'où la session suffixée.
+        """
+        if persona not in PERSONAS:
+            raise ValueError(f"Voix inconnue : {persona}")
+        session_id = f"{session_id}-{persona}"
+        autorises = {t["name"] for t in self.outils(persona)}
         events: list[dict] = []
 
         def emit(event: dict) -> None:
@@ -149,7 +176,7 @@ class Agent:
 
         try:
             for _ in range(self.settings.max_tool_rounds):
-                response = self._create(messages)
+                response = self._create(messages, persona)
                 stop = response.stop_reason
 
                 if stop == "refusal":
@@ -161,7 +188,7 @@ class Agent:
                     texts.append(t)
                 for block in response.content:
                     if block.type == "server_tool_use":  # recherche / lecture web côté Anthropic
-                        emit({"outil": block.name, "agent": AGENT_PAR_OUTIL.get(block.name, "jarvis"),
+                        emit({"outil": block.name, "agent": AGENT_PAR_OUTIL.get(block.name, persona),
                               "entree": block.input, "erreur": False, "resultat": ""})
 
                 if stop == "pause_turn":  # recherche web longue : on relance pour continuer
@@ -172,9 +199,12 @@ class Agent:
                 results = []
                 for block in response.content:
                     if block.type == "tool_use":
-                        log.info("outil %s %s", block.name, block.input)
-                        content, is_error = run_tool(ctx, block.name, block.input)
-                        emit({"outil": block.name, "agent": AGENT_PAR_OUTIL.get(block.name, "jarvis"),
+                        log.info("[%s] outil %s %s", persona, block.name, block.input)
+                        if block.name in autorises:
+                            content, is_error = run_tool(ctx, block.name, block.input)
+                        else:  # garde-fou : Caro ne peut pas appeler un outil qui modifie
+                            content, is_error = "Outil non autorisé pour cette voix. Demande à Cortana.", True
+                        emit({"outil": block.name, "agent": AGENT_PAR_OUTIL.get(block.name, persona),
                               "entree": block.input, "erreur": is_error, "resultat": content[:300]})
                         results.append({"type": "tool_result", "tool_use_id": block.id,
                                         "content": content, "is_error": is_error})
@@ -195,4 +225,5 @@ class Agent:
         return AgentReply(reply, ctx.iphone_action, stop, events)
 
     def reset(self, session_id: str = "iphone") -> None:
-        self.store.reset_session(session_id)
+        for persona in PERSONAS:
+            self.store.reset_session(f"{session_id}-{persona}")

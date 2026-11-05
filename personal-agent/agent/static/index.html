@@ -86,8 +86,33 @@ section { padding-top: 26px; }
   background: radial-gradient(circle at 50% 50%, rgba(28,230,215,.08), transparent 65%), rgba(6,10,18,.9); }
 .salle canvas { display: block; width: 100%; height: min(92vw, 440px); }
 .salle .coin { position: absolute; left: 12px; top: 10px; font: 600 10.5px var(--f-mono); letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
-.legende { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 10px; }
-@media (min-width: 760px) { .legende { grid-template-columns: repeat(3, 1fr); } }
+.voix { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.voix .agent { flex-direction: column; align-items: flex-start; gap: 2px; border-left: 2px solid var(--c); }
+.voix .agent b { color: var(--c); font-size: 14px; }
+.voix .agent span { white-space: normal; }
+.roster { margin-top: 12px; display: grid; gap: 10px; }
+.groupe h4 { margin: 0 0 6px; font: 600 10.5px var(--f-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--c); }
+.groupe .liste { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+@media (min-width: 760px) { .groupe .liste { grid-template-columns: repeat(4, 1fr); } }
+button.agent { text-align: left; width: 100%; color: inherit; }
+.agent.sel { border-color: var(--c); background: rgba(16,26,44,.95); }
+.st-pill { font: 600 9.5px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.st-pill.st-livre, .agent .st-pill.st-livre { color: var(--turq); }
+.st-pill.st-test, .st-pill.st-partiel, .agent .st-pill.st-test, .agent .st-pill.st-partiel { color: var(--jaune); }
+.st-pill.st-a_batir, .agent .st-pill.st-a_batir { color: var(--muted); }
+.live, .agent .live { font: 700 9px var(--f-mono); color: var(--bg); background: var(--neon); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.agent .dot.a_batir { background: transparent !important; border: 1.5px dashed var(--c); }
+.agent .dot.test, .agent .dot.partiel { background: linear-gradient(90deg, var(--c) 50%, transparent 50%) !important; border: 1.5px solid var(--c); }
+.fiche { margin-top: 10px; }
+.fiche[hidden] { display: none; }
+.fiche .tete { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.fiche .tete b { font: 700 16px var(--f-titre); letter-spacing: .06em; color: var(--acc); }
+.fiche p { margin: 6px 0 0; font-size: 14px; }
+.perso { display: flex; gap: 6px; margin-top: 12px; }
+.perso button { flex: 1; border: 1px solid var(--line); background: rgba(11,18,32,.6); border-radius: 12px; padding: 8px 10px; text-align: left; }
+.perso button b { display: block; font: 700 13px var(--f-titre); letter-spacing: .1em; text-transform: uppercase; color: var(--c); }
+.perso button span { font-size: 11.5px; color: var(--muted); }
+.perso button.on { border-color: var(--c); box-shadow: 0 0 18px -6px var(--c); background: rgba(16,26,44,.95); }
 .agent { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(11,18,32,.5); min-width: 0; }
 .agent .dot { background: var(--c); box-shadow: none; animation: none; }
 .agent.actif { border-color: var(--c); box-shadow: 0 0 18px -6px var(--c); }
@@ -227,16 +252,18 @@ svg.courbe { width: 100%; height: 120px; display: block; }
   <main class="wrap">
     <!-- BLACKBOX -->
     <section id="blackbox">
-      <div class="titre"><h2>Blackbox</h2><span class="sous">la salle des agents, en direct</span></div>
+      <div class="titre"><h2>Blackbox</h2><span class="sous">l'écosystème Jarvis, en direct</span></div>
       <div class="salle">
-        <canvas id="salle" aria-label="Animation des agents de Jarvis au travail"></canvas>
+        <canvas id="salle" aria-label="Jarvis au centre, Cortana et Caro, et les agents du Catalogue en cercle. Touche un agent pour voir sa fiche."></canvas>
         <div class="coin" id="salle-coin">salle calme</div>
       </div>
-      <div class="legende" id="legende"></div>
+      <div class="perso" id="perso" role="group" aria-label="Choisir la voix"></div>
       <form class="ordre" id="ordre-form">
-        <input type="text" id="ordre" placeholder="Donne un ordre à Jarvis…" autocomplete="off" enterkeyhint="send">
+        <input type="text" id="ordre" placeholder="Cortana, fais…" autocomplete="off" enterkeyhint="send">
         <button class="btn" id="ordre-btn">Go</button>
       </form>
+      <div class="hud fiche" id="fiche" hidden></div>
+      <div class="roster" id="roster"></div>
       <div class="kpis" style="margin-top:12px">
         <div class="kpi"><b id="k-run">0</b><span>en exécution</span></div>
         <div class="kpi"><b id="k-jour">0</b><span>tâches aujourd'hui</span></div>
@@ -397,11 +424,20 @@ const STATUTS = { en_cours: "en cours", termine: "terminé", erreur: "erreur", r
 const NOMS = { prix_crypto: "Prix crypto", marche_crypto: "Marché crypto", note_ajouter: "Note ajoutée", notes_lister: "Lecture des notes",
   note_supprimer: "Note supprimée", tache_ajouter: "Tâche ajoutée", taches_lister: "Lecture des tâches", tache_terminer: "Tâche terminée",
   date_heure: "Date et heure", action_iphone: "Action iPhone", web_search: "Recherche web", web_fetch: "Lecture de page",
-  backtest: "Backtest", memoire_lire: "Lecture mémoire", memoire_journal: "Journal", memoire_lecon: "Nouvelle leçon", memoire_prediction: "Prédiction" };
-const couleur = (agent) => (agentsParId[agent] || {}).couleur || "#1ce6d7";
+  backtest: "Backtest", memoire_lire: "Lecture mémoire", memoire_journal: "Journal", memoire_lecon: "Nouvelle leçon", memoire_prediction: "Prédiction",
+  agents_catalogue: "Catalogue des agents" };
+const PERSO_COUL = { cortana: "#1ce6d7", caro: "#b26bff", jarvis: "#eafcff" };
+const fiche = (id) => agentsParId[id] || (state && state.personas.find((p) => p.id === id)) || null;
+const couleur = (id) => (fiche(id) || {}).couleur || PERSO_COUL[id] || "#1ce6d7";
+const nomDe = (id) => (fiche(id) || {}).nom || (id === "jarvis" ? "Jarvis" : id);
+const STATUT_COURT = { livre: "livré", test: "en test", partiel: "partiel", a_batir: "à bâtir" };
+let persona = store.get("jarvis_persona", "cortana");
+let selection = null;
 
 // ---------- BLACKBOX : la salle animée ----------
-const salle = { cv: null, ctx: null, w: 0, h: 0, dpr: 1, paquets: [], particules: [], vus: new Set(), actifs: new Set(), energie: 0, cible: 0 };
+// Jarvis (l'écosystème) au centre, les deux voix autour du cœur, les agents du Catalogue en cercle.
+const salle = { cv: null, ctx: null, w: 0, h: 0, dpr: 1, paquets: [], particules: [], vus: new Set(),
+  actifs: new Map(), energie: 0, cible: 0, pos: [] };
 function initSalle() {
   salle.cv = $("#salle"); salle.ctx = salle.cv.getContext("2d");
   const resize = () => {
@@ -412,37 +448,53 @@ function initSalle() {
     if (reduit) dessiner(performance.now());
   };
   addEventListener("resize", resize); resize();
-  for (let i = 0; i < 140; i++) salle.particules.push({ a: Math.random() * Math.PI * 2, r: Math.random(), v: 0.2 + Math.random() * 0.8, p: Math.random() * 6 });
+  for (let i = 0; i < 120; i++) salle.particules.push({ a: Math.random() * Math.PI * 2, r: Math.random(), v: 0.2 + Math.random() * 0.8, p: Math.random() * 6 });
+  salle.cv.addEventListener("click", (ev) => {
+    const b = salle.cv.getBoundingClientRect(), x = ev.clientX - b.left, y = ev.clientY - b.top;
+    let best = null, d = 22;
+    for (const p of salle.pos) { const dd = Math.hypot(p.x - x, p.y - y); if (dd < d) { d = dd; best = p; } }
+    if (best) choisir(best.id);
+  });
   if (!reduit) requestAnimationFrame(boucle);
 }
 function positions() {
-  const ag = state ? state.agents : [];
-  const cx = salle.w / 2, cy = salle.h / 2, R = Math.min(salle.w, salle.h) * 0.36;
-  return ag.map((a, i) => {
-    const ang = -Math.PI / 2 + i * (Math.PI * 2 / ag.length);
-    return { ...a, x: cx + Math.cos(ang) * R, y: cy + Math.sin(ang) * R * 0.92 };
+  if (!state) return [];
+  const w = salle.w, h = salle.h, cx = w / 2, cy = h / 2, m = Math.min(w, h);
+  const ordre = Object.keys(state.groupes);
+  const ag = [...state.agents].sort((a, b) => ordre.indexOf(a.groupe) - ordre.indexOf(b.groupe));
+  const rx = Math.min(w * 0.43, m * 0.62), ry = h * 0.42;
+  const out = ag.map((a, i) => {
+    const ang = -Math.PI / 2 + (i + 0.5) * (Math.PI * 2 / ag.length);
+    return { ...a, ang, x: cx + Math.cos(ang) * rx, y: cy + Math.sin(ang) * ry, r: m > 420 ? 9 : 7 };
   });
+  const rp = m * 0.2;
+  for (const [i, p] of state.personas.entries()) {
+    const ang = i === 0 ? Math.PI : 0;
+    out.push({ ...p, persona: true, ang, x: cx + Math.cos(ang) * rp, y: cy + 6, r: m > 420 ? 14 : 12 });
+  }
+  salle.pos = out;
+  return out;
 }
 function majSalle() {
-  // Repère les nouvelles étapes : chacune envoie un paquet du cœur vers l'agent concerné.
+  // Chaque nouvelle étape envoie des paquets de la voix (Cortana ou Caro) vers l'agent qui travaille.
   const maintenant = Date.now() / 1000;
-  salle.actifs = new Set();
+  salle.actifs = new Map();
   let enCours = 0;
   for (const a of state.activite) {
-    if (a.statut === "en_cours") enCours++;
+    const de = a.persona || "cortana";
+    if (a.statut === "en_cours") { enCours++; salle.actifs.set(de, de); }
     a.etapes.forEach((e, i) => {
-      const cle = a.id + ":" + i;
-      const ag = e.agent || "jarvis";
+      const cle = a.id + ":" + i, ag = e.agent || de;
       if (!salle.vus.has(cle)) {
         salle.vus.add(cle);
-        if (maintenant - (e.t || 0) < 20) for (let k = 0; k < 6; k++) salle.paquets.push({ ag, t: -k * 0.12, c: couleur(ag) });
+        if (maintenant - (e.t || 0) < 20) for (let k = 0; k < 6; k++) salle.paquets.push({ de, ag, t: -k * 0.12, c: couleur(ag) });
       }
-      if (maintenant - (e.t || 0) < 6) salle.actifs.add(ag);
+      if (maintenant - (e.t || 0) < 6) salle.actifs.set(ag, de);
     });
-    if (a.statut === "en_cours" && a.etapes.length) salle.actifs.add(a.etapes[a.etapes.length - 1].agent || "jarvis");
+    if (a.statut === "en_cours" && a.etapes.length) salle.actifs.set(a.etapes[a.etapes.length - 1].agent || de, de);
   }
-  salle.cible = Math.min(1, enCours * 0.6 + salle.actifs.size * 0.2);
-  $("#salle-coin").textContent = enCours ? `${enCours} tâche${enCours > 1 ? "s" : ""} en exécution` : salle.actifs.size ? "agents actifs" : "salle calme";
+  salle.cible = Math.min(1, enCours * 0.6 + salle.actifs.size * 0.15);
+  $("#salle-coin").textContent = enCours ? `${enCours} tâche${enCours > 1 ? "s" : ""} en exécution` : salle.actifs.size ? "agents actifs" : `${state.agents.length} agents · salle calme`;
   if (reduit) dessiner(performance.now());
 }
 let dernier = 0;
@@ -451,7 +503,7 @@ function boucle(t) {
   salle.energie += (salle.cible - salle.energie) * Math.min(1, dt * 2);
   for (const p of salle.paquets) p.t += dt * 0.9;
   salle.paquets = salle.paquets.filter((p) => p.t < 1);
-  if (state && salle.actifs.size) for (const ag of salle.actifs) if (Math.random() < dt * 3) salle.paquets.push({ ag, t: 0, c: couleur(ag) });
+  if (state) for (const [ag, de] of salle.actifs) if (ag !== de && Math.random() < dt * 3) salle.paquets.push({ de, ag, t: 0, c: couleur(ag) });
   dessiner(t);
   requestAnimationFrame(boucle);
 }
@@ -460,35 +512,45 @@ function dessiner(t) {
   const s = t / 1000;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  // grille du laboratoire
-  ctx.strokeStyle = "rgba(29,38,54,.55)"; ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(29,38,54,.5)"; ctx.lineWidth = 1;
   for (let x = (s * 6) % 28; x < w; x += 28) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
   for (let y = 0; y < h; y += 28) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
   if (!state) return;
-  const cx = w / 2, cy = h / 2, pos = positions(), e = salle.energie;
+  const cx = w / 2, cy = h / 2, m = Math.min(w, h), pos = positions(), e = salle.energie;
   const parId = Object.fromEntries(pos.map((p) => [p.id, p]));
+  const petit = m <= 420;
 
-  // liens cœur → stations
-  for (const p of pos) {
-    const actif = salle.actifs.has(p.id);
-    ctx.strokeStyle = actif ? p.couleur : "rgba(143,166,184,.16)";
-    ctx.globalAlpha = actif ? 0.55 + 0.25 * Math.sin(s * 6) : 1;
-    ctx.lineWidth = actif ? 1.6 : 1; ctx.setLineDash(actif ? [] : [3, 5]);
+  // arcs de groupe derrière l'anneau
+  const rx = Math.min(w * 0.43, m * 0.62), ry = h * 0.42, pas = Math.PI * 2 / state.agents.length;
+  ctx.lineWidth = 3; ctx.globalAlpha = 0.28;
+  for (const p of pos) if (!p.persona) {
+    ctx.strokeStyle = p.couleur; ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, p.ang - pas / 2 + 0.03, p.ang + pas / 2 - 0.03); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // liens : cœur ↔ voix toujours, voix → agent quand il travaille
+  for (const p of pos) if (p.persona) {
+    ctx.strokeStyle = p.couleur; ctx.globalAlpha = salle.actifs.has(p.id) ? 0.7 : 0.25; ctx.lineWidth = 1.4; ctx.setLineDash([3, 4]);
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(p.x, p.y); ctx.stroke();
   }
-  ctx.setLineDash([]); ctx.globalAlpha = 1;
-
-  // paquets de données en route
+  ctx.setLineDash([]);
+  for (const [ag, de] of salle.actifs) {
+    const a = parId[ag], d = parId[de]; if (!a || !d || a === d) continue;
+    ctx.strokeStyle = a.couleur; ctx.globalAlpha = 0.5 + 0.25 * Math.sin(s * 6); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(a.x, a.y); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
   for (const pq of salle.paquets) {
-    const p = parId[pq.ag]; if (!p || pq.t < 0) continue;
-    const x = cx + (p.x - cx) * pq.t, y = cy + (p.y - cy) * pq.t;
+    const a = parId[pq.ag], d = parId[pq.de] || { x: cx, y: cy }; if (!a || pq.t < 0 || a === d) continue;
+    const x = d.x + (a.x - d.x) * pq.t, y = d.y + (a.y - d.y) * pq.t;
     ctx.fillStyle = pq.c; ctx.shadowColor = pq.c; ctx.shadowBlur = 12;
-    ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, 2.4, 0, Math.PI * 2); ctx.fill();
   }
   ctx.shadowBlur = 0;
 
-  // cœur de Jarvis : masse de points agités, couleur qui cycle turquoise ↔ mauve ↔ jaune
-  const R = Math.min(w, h) * (0.11 + 0.025 * e);
+  // cœur de Jarvis
+  const R = m * (0.085 + 0.02 * e);
   const cyc = (s * 0.25) % 3, cols = [[28, 230, 215], [178, 107, 255], [255, 225, 77]];
   const c0 = cols[Math.floor(cyc)], c1 = cols[(Math.floor(cyc) + 1) % 3], f = cyc % 1;
   const col = c0.map((v, i) => Math.round(v + (c1[i] - v) * f));
@@ -499,28 +561,96 @@ function dessiner(t) {
     const agit = 1 + e * 2.5;
     const a = pt.a + s * pt.v * 0.6 * agit, rr = R * (0.25 + 0.75 * Math.sqrt(pt.r)) * (1 + 0.08 * Math.sin(s * 3 * agit + pt.p));
     ctx.fillStyle = `rgba(${col},${0.5 + 0.5 * pt.r})`;
-    ctx.fillRect(cx + Math.cos(a) * rr, cy + Math.sin(a * 1.3) * rr * 0.9, 1.8, 1.8);
+    ctx.fillRect(cx + Math.cos(a) * rr, cy + Math.sin(a * 1.3) * rr * 0.9, 1.7, 1.7);
   }
-  ctx.font = "700 12px 'Chakra Petch', system-ui"; ctx.textAlign = "center"; ctx.fillStyle = "#eafcff";
-  ctx.fillText("JARVIS", cx, cy + R + 18);
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  ctx.font = `700 ${petit ? 11 : 13}px 'Chakra Petch', system-ui`; ctx.fillStyle = "#eafcff";
+  ctx.fillText("JARVIS", cx, cy - R - 10);
 
-  // stations des agents
+  // nœuds
   for (const p of pos) {
-    const actif = salle.actifs.has(p.id), r = 15;
-    if (actif) {
-      const halo = r + 8 + 5 * Math.sin(s * 5);
-      ctx.strokeStyle = p.couleur; ctx.globalAlpha = 0.5; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(p.x, p.y, halo, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
-      ctx.shadowColor = p.couleur; ctx.shadowBlur = 20;
+    const actif = salle.actifs.has(p.id), sel = selection === p.id, r = p.r;
+    if (actif || sel) {
+      ctx.strokeStyle = p.couleur; ctx.globalAlpha = sel && !actif ? 0.9 : 0.5; ctx.lineWidth = sel ? 1.5 : 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r + 6 + (actif ? 3 * Math.sin(s * 5) : 0), 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = "#0b1220"; ctx.strokeStyle = p.couleur; ctx.lineWidth = actif ? 2.5 : 1.4;
-    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
-    ctx.fillStyle = p.couleur; ctx.globalAlpha = actif ? 1 : 0.55 + 0.2 * Math.sin(s * 1.3 + p.x);
-    ctx.beginPath(); ctx.arc(p.x, p.y, actif ? 6 : 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
-    ctx.font = "600 11px 'Chakra Petch', system-ui"; ctx.fillStyle = actif ? p.couleur : "#8fa6b8";
-    const dessous = p.y > cy;
-    ctx.fillText(p.nom.toUpperCase(), p.x, p.y + (dessous ? r + 15 : -r - 8));
+    if (actif) { ctx.shadowColor = p.couleur; ctx.shadowBlur = 18; }
+    ctx.fillStyle = "#0b1220"; ctx.strokeStyle = p.couleur; ctx.lineWidth = actif ? 2.4 : 1.4;
+    if (p.statut === "a_batir") { ctx.setLineDash([2.5, 2.5]); ctx.globalAlpha = actif ? 1 : 0.6; }
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.setLineDash([]); ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    // remplissage selon le statut : plein = livré, moitié = en test / partiel
+    ctx.fillStyle = p.couleur;
+    if (p.persona || p.statut === "livre") { ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.55, 0, Math.PI * 2); ctx.fill(); }
+    else if (p.statut === "test" || p.statut === "partiel") { ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.55, Math.PI / 2, Math.PI * 1.5); ctx.fill(); }
+    // branché dans Jarvis : petit point néon qui respire
+    if (!p.persona && p.outils && p.outils.length) {
+      ctx.fillStyle = "#c6ff4d"; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(s * 2 + p.x);
+      ctx.beginPath(); ctx.arc(p.x + r * 0.75, p.y - r * 0.75, 2.4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    }
+    // étiquette
+    if (p.persona) {
+      ctx.textAlign = "center"; ctx.font = `700 ${petit ? 11 : 12.5}px 'Chakra Petch', system-ui`; ctx.fillStyle = p.couleur;
+      ctx.fillText(p.nom.toUpperCase(), p.x, p.y + r + (petit ? 14 : 17));
+    } else {
+      const cos = Math.cos(p.ang), sin = Math.sin(p.ang), dist = r + 5;
+      ctx.font = `600 ${petit ? 8.5 : 10.5}px 'Chakra Petch', system-ui`;
+      ctx.fillStyle = actif || sel ? p.couleur : "#8fa6b8";
+      ctx.textAlign = cos > 0.35 ? "right" : cos < -0.35 ? "left" : "center";
+      ctx.textBaseline = sin > 0.35 ? "bottom" : sin < -0.35 ? "top" : "middle";
+      ctx.fillText(p.court, p.x - cos * dist, p.y - sin * dist);
+      ctx.textBaseline = "alphabetic";
+    }
   }
+}
+
+function choisir(id) {
+  selection = selection === id ? null : id;
+  rendreFiche(); rendreRoster();
+  if (reduit) dessiner(performance.now());
+}
+function rendreFiche() {
+  const box = $("#fiche"), f = selection && fiche(selection);
+  if (!f) { box.hidden = true; return; }
+  box.hidden = false; box.style.setProperty("--acc", f.couleur);
+  if (f.declencheur !== undefined) {  // une voix
+    const caro = f.id === "caro" ? state.caro_catalogue : null;
+    box.replaceChildren(h("div", { class: "tete" }, h("b", {}, f.nom), h("span", { class: "small muted" }, "voix de Jarvis")),
+      h("p", {}, f.role + "."), h("p", { class: "small muted" }, "Se lance : " + f.declencheur),
+      caro ? h("p", { class: "small muted" }, `Au Catalogue (n° 1) : ${caro.role}. ${caro.statut_txt}.`) : null,
+      h("p", { class: "small" }, f.id === "caro" ? "Consulte et explique, ne modifie rien." : "A tous les outils ; fait elle-même les tâches, notes, rappels et actions iPhone."));
+    return;
+  }
+  box.replaceChildren(
+    h("div", { class: "tete" }, h("b", {}, f.nom), h("span", { class: "st-pill st-" + f.statut }, STATUT_COURT[f.statut]),
+      h("span", { class: "small muted" }, `${f.num ? "n° " + f.num + " · " : ""}${f.groupe_nom}`)),
+    h("p", {}, h("b", {}, f.role + ". "), f.fait),
+    h("p", { class: "small muted" }, "Statut au Catalogue : " + f.statut_txt + "."),
+    h("p", { class: "small", style: { color: f.outils.length ? "var(--neon)" : "var(--muted)" } },
+      f.outils.length ? "Branché dans Jarvis : " + f.dans_jarvis : "Pas encore branché dans Jarvis."),
+    f.outils.length ? h("p", { class: "small mono muted" }, f.outils.join(" · ")) : null);
+}
+function rendrePersona() {
+  $("#perso").replaceChildren(...state.personas.map((p) => h("button", { type: "button", class: persona === p.id ? "on" : "",
+    style: { "--c": p.couleur }, "aria-pressed": persona === p.id ? "true" : "false",
+    onclick: () => { persona = p.id; store.set("jarvis_persona", p.id); rendrePersona(); } },
+    h("b", {}, p.nom), h("span", {}, p.id === "cortana" ? "exécute les tâches" : "explique l'application"))));
+  $("#ordre").placeholder = persona === "caro" ? "Caro, explique-moi…" : "Cortana, fais…";
+}
+function rendreRoster() {
+  const list = state.activite, auj = new Date().toDateString(), compte = {};
+  for (const a of list) for (const e of a.etapes) if (new Date(a.debut * 1000).toDateString() === auj) compte[e.agent] = (compte[e.agent] || 0) + 1;
+  const parGroupe = {};
+  for (const a of state.agents) (parGroupe[a.groupe] = parGroupe[a.groupe] || []).push(a);
+  $("#roster").replaceChildren(...Object.entries(state.groupes).filter(([k]) => parGroupe[k]).map(([k, gr]) =>
+    h("div", { class: "groupe", style: { "--c": gr.couleur } }, h("h4", {}, `${gr.nom} · ${parGroupe[k].length}`),
+      h("div", { class: "liste" }, parGroupe[k].map((a) => h("button", { type: "button",
+        class: "agent" + (salle.actifs.has(a.id) ? " actif" : "") + (selection === a.id ? " sel" : ""),
+        style: { "--c": a.couleur }, onclick: () => choisir(a.id), "aria-label": `${a.nom}, ${STATUT_COURT[a.statut]}` },
+        h("span", { class: "dot " + a.statut }),
+        h("div", { style: { minWidth: 0, flex: 1 } }, h("b", {}, a.court, a.outils.length ? h("span", { class: "live" }, "LIVE") : null),
+          h("br"), h("span", { class: "st-pill st-" + a.statut }, STATUT_COURT[a.statut])),
+        compte[a.id] ? h("span", { class: "n", title: "actions aujourd'hui" }, compte[a.id]) : null))))));
 }
 
 function rendreBlackbox() {
@@ -531,35 +661,31 @@ function rendreBlackbox() {
   $("#k-etapes").textContent = list.reduce((n, a) => n + a.etapes.length, 0);
   $("#etat-dot").className = "dot " + (enCours ? "run" : "ok");
   $("#etat-txt").textContent = enCours ? "travaille" : "en ligne";
-
-  // légende des agents
-  const compte = {};
-  for (const a of list) for (const e of a.etapes) if (new Date(a.debut * 1000).toDateString() === auj) compte[e.agent] = (compte[e.agent] || 0) + 1;
-  $("#legende").replaceChildren(...state.agents.map((a) => h("div", { class: "agent" + (salle.actifs.has(a.id) ? " actif" : ""), style: { "--c": a.couleur } },
-    h("span", { class: "dot" }), h("div", { style: { minWidth: 0 } }, h("b", {}, a.nom), h("br"), h("span", {}, a.role)),
-    h("span", { class: "n", title: "actions aujourd'hui" }, compte[a.id] || 0))));
+  rendrePersona(); rendreRoster(); rendreFiche();
 
   // tableau des tâches
   const box = $("#taches-exec");
   const lignes = [...list].sort((a, b) => (b.statut === "en_cours") - (a.statut === "en_cours")).slice(0, 15);
   box.replaceChildren(h("div", { class: "thead" }, h("span", {}, "Statut"), h("span", {}, "Tâche"),
     h("span", { class: "col-ag" }, "Agents"), h("span", { class: "col-et" }, "Étapes"), h("span", { style: { textAlign: "right" } }, "Durée")));
-  if (!lignes.length) box.append(h("div", { class: "vide" }, "Aucune tâche pour l'instant. Parle à Siri ou donne un ordre ci-dessus."));
+  if (!lignes.length) box.append(h("div", { class: "vide" }, "Aucune tâche pour l'instant. Dis « Cortana » ou donne un ordre ci-dessus."));
   for (const a of lignes) {
-    const agents = [...new Set(a.etapes.map((e) => e.agent || "jarvis"))];
+    const de = a.persona || "cortana";
+    const agents = [...new Set(a.etapes.map((e) => e.agent || de))];
     const duree = a.fin ? `${Math.max(0, Math.round(a.fin - a.debut))} s` : `${Math.round(Date.now() / 1000 - a.debut)} s`;
     const ouvert = ouverts.has(a.id);
     box.append(h("button", { class: "tr" + (a.statut === "en_cours" ? " run" : ""), "aria-expanded": ouvert ? "true" : "false",
       onclick: () => { ouverts.has(a.id) ? ouverts.delete(a.id) : ouverts.add(a.id); rendreBlackbox(); } },
       h("span", { class: "statut " + a.statut }, h("span", { class: "dot " + ({ en_cours: "run", termine: "ok" }[a.statut] || "err") }), STATUTS[a.statut] || a.statut),
-      h("span", { class: "dem" }, a.demande, h("small", {}, `${a.source === "iphone" ? "iPhone" : "Tableau de bord"} · ${ago(a.debut)}`)),
-      h("span", { class: "col-ag pts" }, agents.map((g) => h("i", { style: { "--c": couleur(g) }, title: (agentsParId[g] || {}).nom || g }))),
+      h("span", { class: "dem" }, a.demande, h("small", {}, h("span", { style: { color: couleur(de) } }, nomDe(de)),
+        ` · ${a.source === "iphone" ? "iPhone" : "page"} · ${ago(a.debut)}`)),
+      h("span", { class: "col-ag pts" }, agents.map((g) => h("i", { style: { "--c": couleur(g) }, title: nomDe(g) }))),
       h("span", { class: "col-et mono small muted" }, a.etapes.length),
       h("span", { class: "duree" }, duree)));
     if (ouvert) box.append(h("div", { class: "detail" },
       a.etapes.length ? a.etapes.map((e) => h("div", { class: "etape" }, h("i", { style: { "--c": couleur(e.agent) } }),
-        h("div", { class: "grow" }, h("b", { style: { color: e.erreur ? "var(--down)" : "inherit" } }, `${(agentsParId[e.agent] || {}).nom || "Jarvis"} · ${NOMS[e.outil] || e.outil}`),
-          e.entree && Object.keys(e.entree).length ? h("div", {}, h("code", {}, court(e.entree))) : null))) : h("div", { class: "small muted", style: { padding: "8px 0" } }, "Jarvis répond sans outil."),
+        h("div", { class: "grow" }, h("b", { style: { color: e.erreur ? "var(--down)" : "inherit" } }, `${nomDe(e.agent || de)} · ${NOMS[e.outil] || e.outil}`),
+          e.entree && Object.keys(e.entree).length ? h("div", {}, h("code", {}, court(e.entree))) : null))) : h("div", { class: "small muted", style: { padding: "8px 0" } }, `${nomDe(de)} répond sans outil.`),
       a.reponse ? h("div", { class: "reponse" }, a.reponse) : null,
       a.action ? h("div", { class: "action" }, "→ iPhone : " + [a.action.type, a.action.texte, a.action.url, a.action.date].filter(Boolean).join(" · ")) : null));
   }
@@ -678,12 +804,15 @@ function rendreConnexions() {
 }
 
 // ---------- CAPACITÉS ----------
-const ACC_CAT = { Crypto: "var(--jaune)", Trading: "var(--mauve)", Cerveau: "var(--turq)", Organisation: "var(--neon)", iPhone: "var(--orange)", Recherche: "#4da3ff", Divers: "var(--muted)" };
+const ACC_CAT = { "Écosystème": "var(--mauve)", Crypto: "var(--jaune)", Trading: "var(--mauve)", Cerveau: "var(--turq)", Organisation: "var(--neon)", iPhone: "var(--orange)", Recherche: "#4da3ff", Divers: "var(--muted)" };
 function rendreCapacites() {
   const box = $("#caps"); if (box.childElementCount) return;
   box.append(...state.capacites.map((c) => h("div", { class: "hud", style: { "--acc": ACC_CAT[c.categorie] || "var(--turq)" } },
     h("h3", {}, c.categorie + " · " + c.titre), h("p", { class: "small muted", style: { margin: "0 0 10px" } }, c.description),
-    h("div", { class: "chips" }, c.exemples.map((ex) => h("button", { class: "chip", onclick: () => { location.hash = "#blackbox"; envoyer(ex); } }, "« " + ex + " »"))))));
+    h("div", { class: "chips" }, c.exemples.map((ex) => h("button", { class: "chip", onclick: () => {
+      if (c.categorie === "Écosystème") { persona = "caro"; store.set("jarvis_persona", "caro"); rendrePersona(); }
+      location.hash = "#blackbox"; envoyer(ex);
+    } }, "« " + ex + " »"))))));
 }
 
 // ---------- OPTIONS ----------
@@ -751,7 +880,7 @@ async function envoyer(texte) {
   texte = texte.trim(); if (!texte) return;
   $("#ordre-btn").disabled = true; $("#ordre").value = "";
   setTimeout(rafraichir, 350);
-  try { await api("/ask", { method: "POST", body: { text: texte, source: "web" } }); } catch (e) { toast(e.message); }
+  try { await api("/ask", { method: "POST", body: { text: texte, source: "web", persona } }); } catch (e) { toast(e.message); }
   $("#ordre-btn").disabled = false; rafraichir();
 }
 function deconnexion() {

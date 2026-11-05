@@ -84,7 +84,7 @@ def test_refusal_not_saved(settings):
     agent = Agent(settings, client=client)
     reply = agent.ask("...")
     assert reply.stop_reason == "refusal"
-    assert agent.store.load_session("iphone", 6) == []
+    assert agent.store.load_session("iphone-cortana", 6) == []
 
 
 def test_unknown_tool_and_bad_args(settings):
@@ -154,3 +154,30 @@ def test_dashboard_api(settings):
     last = server._agent.client.beta.messages.calls[-1]
     assert last["output_config"] == {"effort": "high"}
     assert all(t.get("name") != "web_search" for t in last["tools"])
+
+
+def test_caro_explique_sans_modifier(settings):
+    """Caro ne reçoit que les outils de lecture ; si elle tente d'écrire, le garde-fou refuse."""
+    client = FakeClient([
+        msg([{"type": "tool_use", "id": "c1", "name": "tache_ajouter", "input": {"titre": "x"}}], "tool_use"),
+        msg([{"type": "text", "text": "Pour ça, demande à Cortana."}], "end_turn"),
+    ])
+    agent = Agent(settings, client=client)
+    reply = agent.ask("ajoute une tâche", persona="caro")
+    noms = {t["name"] for t in client.beta.messages.calls[0]["tools"]}
+    assert "tache_ajouter" not in noms and "action_iphone" not in noms and "agents_catalogue" in noms
+    assert "Tu es Caro" in client.beta.messages.calls[0]["system"][0]["text"]
+    assert agent.store.list_items("taches") == []  # rien n'a été créé
+    assert reply.events[0]["erreur"] is True and reply.events[0]["agent"] == "cortana"
+    # Chaque voix a sa propre conversation.
+    assert agent.store.load_session("iphone-caro", 6) and not agent.store.load_session("iphone-cortana", 6)
+
+
+def test_cortana_a_tous_les_outils_et_le_catalogue(settings):
+    client = FakeClient([msg([{"type": "text", "text": "ok"}], "end_turn")])
+    Agent(settings, client=client).ask("salut")
+    call = client.beta.messages.calls[0]
+    noms = {t["name"] for t in call["tools"]}
+    assert {"tache_ajouter", "action_iphone", "backtest", "agents_catalogue"} <= noms
+    texte = call["system"][0]["text"]
+    assert "Tu es Cortana" in texte and "SOL Paper Trader" in texte and "AEGIS" in texte

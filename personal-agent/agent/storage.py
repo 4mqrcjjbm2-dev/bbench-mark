@@ -81,10 +81,10 @@ class JsonStore:
     # --- journal d'activité (ce que l'agent fait, en direct) ---------------
     ACTIVITY_MAX = 200
 
-    def activity_start(self, texte: str, source: str) -> str:
+    def activity_start(self, texte: str, source: str, persona: str = "cortana") -> str:
         with _lock:
             items = self._read(self._list_path("activite"), [])
-            entry = {"id": uuid.uuid4().hex[:8], "debut": time.time(), "fin": None, "source": source,
+            entry = {"id": uuid.uuid4().hex[:8], "debut": time.time(), "fin": None, "source": source, "persona": persona,
                      "demande": texte, "statut": "en_cours", "etapes": [], "reponse": "", "action": None}
             items.append(entry)
             self._write(self._list_path("activite"), items[-self.ACTIVITY_MAX:])
