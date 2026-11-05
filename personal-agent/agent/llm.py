@@ -20,17 +20,21 @@ def creer_client(settings: Settings) -> anthropic.Anthropic:
 
 
 def creer_message(client, settings: Settings, *, system, messages, tools, effort: str,
-                  max_tokens: int = 16000, cache: bool = True):
-    """Un appel au modèle, avec seulement les paramètres que le moteur choisi comprend."""
+                  max_tokens: int = 16000, cache: bool = True, modele: str | None = None):
+    """Un appel au modèle, avec seulement les paramètres que le moteur choisi comprend.
+
+    modele : pour router une tâche simple vers un modèle plus léger (moins de tokens, moins d'énergie).
+    """
+    modele = modele or settings.model
     if settings.fournisseur == "ollama":
         texte_systeme = system if isinstance(system, str) else "\n\n".join(b["text"] for b in system)
-        kwargs: dict = dict(model=settings.model, max_tokens=min(max_tokens, 8192), system=texte_systeme,
+        kwargs: dict = dict(model=modele, max_tokens=min(max_tokens, 8192), system=texte_systeme,
                             messages=messages)
         if tools:
             kwargs["tools"] = tools
         return client.messages.create(**kwargs)
 
-    kwargs = dict(model=settings.model, max_tokens=max_tokens, system=system, messages=messages,
+    kwargs = dict(model=modele, max_tokens=max_tokens, system=system, messages=messages,
                   thinking={"type": "adaptive"}, output_config={"effort": effort})
     if tools:
         kwargs["tools"] = tools
@@ -41,3 +45,12 @@ def creer_message(client, settings: Settings, *, system, messages, tools, effort
         kwargs["betas"] = ["server-side-fallback-2026-07-01"]
         kwargs["fallbacks"] = "default"
     return client.beta.messages.create(**kwargs)
+
+
+def tokens(response) -> tuple[int, int]:
+    """(entrée, sortie) d'une réponse, cache compris ; 0 si le moteur ne les donne pas."""
+    u = getattr(response, "usage", None)
+    if not u:
+        return 0, 0
+    entree = sum(getattr(u, k, 0) or 0 for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+    return entree, getattr(u, "output_tokens", 0) or 0

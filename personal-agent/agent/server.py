@@ -224,7 +224,7 @@ def ask(body: AskIn) -> AskOut:
     _cache.pop("cerveau", None)  # la mémoire a pu changer
     statut = "refus" if result.stop_reason == "refusal" else "termine"
     store.activity_update(act_id, statut=statut, reponse=result.text,
-                          action=result.iphone_action, fin=time.time())
+                          action=result.iphone_action, fin=time.time(), tokens=result.tokens)
 
     out = AskOut(reply=result.text)
     if a := result.iphone_action:
@@ -377,7 +377,21 @@ def state() -> dict:
         "efforts": list(EFFORTS),
         "capacites": CAPACITES,
         "demarre_depuis": _started,
+        "conso_jour": _conso_jour(agent),
     }
+
+
+def _conso_jour(agent) -> dict:
+    """Tokens consommés aujourd'hui (pour mesurer, puis réduire)."""
+    debut = dt.datetime.now(ZoneInfo(settings.timezone)).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    total = {"entree": 0, "sortie": 0, "taches": 0}
+    for a in agent.store.activity_list(200):
+        if a["debut"] >= debut and a.get("tokens"):
+            total["entree"] += a["tokens"].get("entree", 0)
+            total["sortie"] += a["tokens"].get("sortie", 0)
+            total["taches"] += 1
+    total["moyenne_par_tache"] = round((total["entree"] + total["sortie"]) / total["taches"]) if total["taches"] else 0
+    return total
 
 
 @app.post("/api/backtests", dependencies=auth)

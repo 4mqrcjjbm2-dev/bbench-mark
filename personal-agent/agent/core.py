@@ -11,7 +11,7 @@ import anthropic
 from . import etat
 from .agents_outils import SPECIALISTES
 from .atelier import Atelier
-from .llm import creer_client, creer_message
+from .llm import creer_client, creer_message, tokens
 from .cerveau import Cerveau
 from .cles import Cles
 from .config import Settings
@@ -91,6 +91,7 @@ class AgentReply:
     iphone_action: dict | None
     stop_reason: str
     events: list[dict] = field(default_factory=list)
+    tokens: dict = field(default_factory=lambda: {"entree": 0, "sortie": 0, "appels": 0})
 
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -118,6 +119,7 @@ class Agent:
         self.settings = settings
         self.client = client or creer_client(settings)
         self.store = store or JsonStore(settings.data_dir)
+        self._tokens_specialistes = {"entree": 0, "sortie": 0}
         self.cerveau = Cerveau(settings.cerveau_dir, settings.cerveau_push, settings.timezone) \
             if settings.cerveau_dir else None
         self.atelier = Atelier(settings.atelier_dir, self.store)
@@ -130,6 +132,7 @@ class Agent:
         return {
             "fournisseur": self.settings.fournisseur,
             "model": self.settings.model,
+            "modele_leger": self.settings.modele_leger or self.settings.model,
             "effort": saved.get("effort", self.settings.effort),
             "enable_web": saved.get("enable_web", self.settings.enable_web),
             "fallbacks": self.settings.fallbacks,
@@ -179,11 +182,29 @@ class Agent:
             tools = [t for t in tools if t["name"] in OUTILS_LECTURE]
         return tools
 
+    def modele_pour(self, persona: str) -> str:
+        """Caro explique et les spécialistes résument : un modèle léger suffit. Cortana crée : le principal."""
+        return (self.settings.modele_leger or self.settings.model) if persona in ("caro", "specialiste") \
+            else self.settings.model
+
+    @staticmethod
+    def historique_borne(history: list[dict], maxi: int) -> list[dict]:
+        """Garde les derniers échanges, en coupant juste avant une vraie question (jamais entre un appel
+        d'outil et son résultat). Seulement avec Ollama : chez Claude, l'historique reste intact."""
+        if len(history) <= maxi:
+            return history
+        for i in range(len(history) - maxi, len(history)):
+            m = history[i]
+            if m["role"] == "user" and isinstance(m["content"], str):
+                return history[i:]
+        return []
+
     def _create(self, messages: list[dict], persona: str):
         opts = self.options()
         try:
             response = creer_message(self.client, self.settings, system=self._system(persona), messages=messages,
-                                     tools=self.outils(persona), effort=opts["effort"])
+                                     tools=self.outils(persona), effort=opts["effort"],
+                                     modele=self.modele_pour(persona))
         except Exception as e:
             etat.signaler("claude", False, type(e).__name__)
             raise
@@ -211,7 +232,10 @@ class Agent:
         try:
             for _ in range(6):
                 r = creer_message(self.client, self.settings, system=system, messages=messages, tools=tools,
-                                  effort="low", max_tokens=8000, cache=False)
+                                  effort="low", max_tokens=8000, cache=False, modele=self.modele_pour("specialiste"))
+                e_, s_ = tokens(r)
+                self._tokens_specialistes["entree"] += e_
+                self._tokens_specialistes["sortie"] += s_
                 if r.stop_reason == "refusal":
                     return f"{nom} ne peut pas traiter cette demande."
                 if t := _final_text(r.content):
@@ -250,7 +274,11 @@ class Agent:
                 on_event(event)
 
         history = self.store.load_session(session_id, self.settings.session_ttl_hours)
+        if self.settings.fournisseur == "ollama":
+            history = self.historique_borne(history, self.settings.historique_max)
         messages = history + [{"role": "user", "content": text}]
+        conso = {"entree": 0, "sortie": 0, "appels": 0}
+        self._tokens_specialistes = {"entree": 0, "sortie": 0}
         ctx = ToolContext(self.store, self.settings.timezone, cerveau=self.cerveau, cles=self.cles,
                           specialiste=self.specialiste, lecture_seule=(persona == "caro"),
                           atelier=self.atelier, searxng_url=self.settings.searxng_url)
@@ -260,10 +288,14 @@ class Agent:
             for _ in range(self.settings.max_tool_rounds):
                 response = self._create(messages, persona)
                 stop = response.stop_reason
+                e_, s_ = tokens(response)
+                conso["entree"] += e_
+                conso["sortie"] += s_
+                conso["appels"] += 1
 
                 if stop == "refusal":
                     # On ne garde pas ce tour : la conversation reste dans son état précédent.
-                    return AgentReply("Désolé, je ne peux pas traiter cette demande.", None, stop, events)
+                    return AgentReply("Désolé, je ne peux pas traiter cette demande.", None, stop, events, conso)
 
                 messages.append({"role": "assistant", "content": _dump(response.content)})
                 if t := _final_text(response.content):
@@ -304,7 +336,9 @@ class Agent:
         reply = texts[-1] if texts else "C'est fait."
         if stop == "max_tokens":
             reply += " (réponse tronquée)"
-        return AgentReply(reply, ctx.iphone_action, stop, events)
+        conso["entree"] += self._tokens_specialistes["entree"]
+        conso["sortie"] += self._tokens_specialistes["sortie"]
+        return AgentReply(reply, ctx.iphone_action, stop, events, conso)
 
     def reset(self, session_id: str = "iphone") -> None:
         for persona in PERSONAS:

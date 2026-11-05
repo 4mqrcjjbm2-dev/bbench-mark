@@ -34,6 +34,10 @@ case "$MODELE" in
                    echo "   $DOCKER compose exec ollama ollama signin" ;;
   *) $DOCKER compose exec -T ollama ollama pull "$MODELE" ;;
 esac
+LEGER=$(grep -E '^AGENT_MODELE_LEGER=' .env | cut -d= -f2-)
+if [ -n "$LEGER" ] && [ "$LEGER" != "$MODELE" ]; then
+  case "$LEGER" in *-cloud|*:cloud) ;; *) $DOCKER compose exec -T ollama ollama pull "$LEGER" ;; esac
+fi
 
 echo "== 5/5  Accès depuis l'iPhone"
 if command -v tailscale >/dev/null; then

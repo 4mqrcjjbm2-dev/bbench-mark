@@ -183,3 +183,42 @@ def test_serveur_atelier_et_autorisations(tmp_path, monkeypatch):
     assert a.store.list_items("demandes")[0]["statut"] == "terminee"
     assert (a.atelier.racine / "fait.txt").read_text().strip() == "ok"
     assert c.post(f"/api/demandes/{d['id']}/autoriser", headers=H).status_code == 409  # pas deux fois
+
+
+def test_economies_tokens_energie(tmp_path, monkeypatch):
+    """Modèle léger pour Caro, historique borné avec Ollama, tokens comptés."""
+    from anthropic.types import Message
+
+    from agent.config import load_settings
+    from agent.core import Agent
+
+    monkeypatch.setenv("AGENT_FOURNISSEUR", "ollama")
+    monkeypatch.setenv("AGENT_MODELE_LEGER", "qwen3:4b")
+    monkeypatch.setenv("AGENT_HISTORIQUE_MAX", "4")
+    monkeypatch.setenv("AGENT_DATA_DIR", str(tmp_path))
+
+    class Fake:
+        def __init__(self):
+            self.calls, self.messages = [], self
+
+        def create(self, **kw):
+            self.calls.append({**kw, "messages": list(kw["messages"])})
+            return Message.model_validate({"id": "m", "type": "message", "role": "assistant", "model": kw["model"],
+                                           "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                                           "stop_sequence": None, "usage": {"input_tokens": 120, "output_tokens": 30}})
+
+    fake = Fake()
+    a = Agent(load_settings(), client=fake)
+    rep = a.ask("salut", persona="caro")
+    assert fake.calls[0]["model"] == "qwen3:4b" and rep.tokens == {"entree": 120, "sortie": 30, "appels": 1}
+    a.ask("crée un site")
+    assert fake.calls[1]["model"] == "qwen3:8b"  # Cortana garde le modèle principal
+    for i in range(5):
+        a.ask(f"question {i}")
+    envoyes = fake.calls[-1]["messages"]
+    assert len(envoyes) <= 5 and envoyes[0]["role"] == "user" and isinstance(envoyes[0]["content"], str)
+    # La coupure ne sépare jamais un appel d'outil de son résultat.
+    h = [{"role": "user", "content": "q1"}, {"role": "assistant", "content": [{"type": "tool_use"}]},
+         {"role": "user", "content": [{"type": "tool_result"}]}, {"role": "assistant", "content": "r"},
+         {"role": "user", "content": "q2"}, {"role": "assistant", "content": "r2"}]
+    assert Agent.historique_borne(h, 3) == h[4:]

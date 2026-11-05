@@ -40,6 +40,8 @@ class Settings:
     ollama_url: str
     searxng_url: str
     atelier_dir: Path         # le dossier de création de Jarvis
+    modele_leger: str         # modèle plus petit pour Caro et les spécialistes ("" = le même)
+    historique_max: int       # messages gardés en contexte avec Ollama (vitesse, énergie)
 
 
 def load_settings() -> Settings:
@@ -60,4 +62,6 @@ def load_settings() -> Settings:
         ollama_url=os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/"),
         searxng_url=os.environ.get("SEARXNG_URL", "").rstrip("/"),
         atelier_dir=Path(os.environ.get("AGENT_ATELIER", Path.home() / "Jarvis")).expanduser(),
+        modele_leger=os.environ.get("AGENT_MODELE_LEGER", ""),
+        historique_max=int(os.environ.get("AGENT_HISTORIQUE_MAX", "24")),
     )

@@ -731,6 +731,8 @@ function rendreBlackbox() {
         h("div", { class: "grow" }, h("b", { style: { color: e.erreur ? "var(--down)" : "inherit" } }, `${nomDe(e.agent || de)} · ${NOMS[e.outil] || e.outil}`),
           e.entree && Object.keys(e.entree).length ? h("div", {}, h("code", {}, court(e.entree))) : null))) : h("div", { class: "small muted", style: { padding: "8px 0" } }, `${nomDe(de)} répond sans outil.`),
       a.reponse ? h("div", { class: "reponse" }, a.reponse) : null,
+      a.tokens && a.tokens.appels ? h("div", { class: "small muted mono", style: { marginTop: "6px" } },
+        `${a.tokens.entree.toLocaleString("fr-FR")} tokens lus · ${a.tokens.sortie.toLocaleString("fr-FR")} écrits · ${a.tokens.appels} appel${a.tokens.appels > 1 ? "s" : ""} au modèle`) : null,
       a.action ? h("div", { class: "action" }, "→ iPhone : " + [a.action.type, a.action.texte, a.action.url, a.action.date].filter(Boolean).join(" · ")) : null));
   }
 }
@@ -949,7 +951,10 @@ function rendreOptions() {
   $("#web").checked = !!o.enable_web;
   $("#beacon-actif").checked = !!o.beacon_actif;
   if (document.activeElement !== $("#beacon-heure")) $("#beacon-heure").value = o.beacon_heure;
-  const rows = [["Moteur IA", o.fournisseur === "ollama" ? "Ollama (libre, gratuit)" : "Claude (clé API)"], ["Modèle", o.model], ["Secours si refus par erreur", o.fallbacks ? "activé" : "désactivé"],
+  const c = state.conso_jour || {};
+  const rows = [["Moteur IA", o.fournisseur === "ollama" ? "Ollama (libre, gratuit)" : "Claude (clé API)"], ["Modèle", o.model],
+    ["Modèle léger (Caro, spécialistes)", o.modele_leger],
+    ["Tokens aujourd'hui", `${((c.entree || 0) + (c.sortie || 0)).toLocaleString("fr-FR")} (${c.taches || 0} tâches, ~${(c.moyenne_par_tache || 0).toLocaleString("fr-FR")} par tâche)`], ["Secours si refus par erreur", o.fallbacks ? "activé" : "désactivé"],
     ["Mémoire de conversation", o.session_ttl_hours + " h"], ["Fuseau", o.timezone], ["Serveur démarré", ago(state.demarre_depuis)]];
   $("#config").replaceChildren(...rows.map(([k, v]) => h("div", { class: "kv" }, h("span", { class: "muted" }, k), h("b", {}, v))));
 }
