@@ -113,6 +113,11 @@ button.agent { text-align: left; width: 100%; color: inherit; }
 .creation .ico { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; font: 700 10px var(--f-mono); color: var(--bg); background: var(--c); flex: none; text-transform: uppercase; }
 .creation a { color: var(--ink); text-decoration: none; font-weight: 600; overflow-wrap: anywhere; }
 .apercu { width: 100%; height: 420px; border: 1px solid var(--line); border-radius: 12px; background: #fff; margin-top: 8px; }
+.renfort { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.renfort[hidden] { display: none; }
+.renfort button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 5px 12px; font: 700 11px var(--f-mono); letter-spacing: .08em; color: var(--muted); }
+.renfort button[aria-pressed="true"] { border-color: var(--jaune); color: var(--bg); background: var(--jaune); box-shadow: 0 0 16px -6px var(--jaune); }
+.badge-renfort { font: 700 9px var(--f-mono); color: var(--bg); background: var(--jaune); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: middle; }
 .cle { padding: 12px 0; border-top: 1px solid var(--line); display: grid; gap: 8px; }
 .cle:first-of-type { border-top: 0; padding-top: 0; }
 .cle .ligne1 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -282,6 +287,10 @@ svg.courbe { width: 100%; height: 120px; display: block; }
         <input type="text" id="ordre" placeholder="Cortana, fais…" autocomplete="off" enterkeyhint="send">
         <button class="btn" id="ordre-btn">Go</button>
       </form>
+      <div class="renfort" id="renfort" hidden>
+        <button type="button" id="renfort-btn" aria-pressed="false">RENFORT</button>
+        <span id="renfort-txt"></span>
+      </div>
       <div class="hud fiche" id="fiche" hidden></div>
       <div class="roster" id="roster"></div>
       <div class="kpis" style="margin-top:12px">
@@ -371,6 +380,13 @@ svg.courbe { width: 100%; height: 120px; display: block; }
           <div class="cx" style="margin-top:10px">
             <div class="grow"><b>Recherche web</b><div class="small muted">Actualités et lecture de pages (facturé en plus).</div></div>
             <label class="switch"><input type="checkbox" id="web"><span></span></label></div>
+        </div>
+        <div class="hud" style="--acc:var(--jaune)" id="renfort-options"><h3>Modèle renfort</h3>
+          <p class="small muted" style="margin:0 0 6px" id="renfort-modele"></p>
+          <div class="cx"><div class="grow"><b>Renfort disponible</b><div class="small muted">Gros modèle cloud, payant en crédits. Jamais hors ligne ni pour Caro.</div></div>
+            <label class="switch"><input type="checkbox" id="renfort-actif"><span></span></label></div>
+          <div class="cx"><div class="grow"><b>Automatique pour les grosses créations</b><div class="small muted">Site, appli, jeu, plan d'affaires, analyse complète… Sinon : seulement avec le bouton RENFORT.</div></div>
+            <label class="switch"><input type="checkbox" id="renfort-auto"><span></span></label></div>
         </div>
         <div class="hud" style="--acc:var(--neon)"><h3>BEACON · rapport du matin</h3>
           <div class="cx"><div class="grow"><b>Rapport quotidien sur l'iPhone</b><div class="small muted">Crypto, tendances, bourse, or, pétrole et tes tâches, en notification.</div></div>
@@ -474,6 +490,7 @@ const couleur = (id) => (fiche(id) || {}).couleur || PERSO_COUL[id] || "#1ce6d7"
 const nomDe = (id) => (fiche(id) || {}).nom || (id === "jarvis" ? "Jarvis" : id);
 const STATUT_COURT = { livre: "livré", test: "en test", partiel: "partiel", a_batir: "à bâtir" };
 let persona = store.get("jarvis_persona", "cortana");
+let renfortForce = false;
 let selection = null;
 
 // ---------- BLACKBOX : la salle animée ----------
@@ -680,6 +697,11 @@ function rendrePersona() {
     onclick: () => { persona = p.id; store.set("jarvis_persona", p.id); rendrePersona(); } },
     h("b", {}, p.nom), h("span", {}, p.id === "cortana" ? "exécute les tâches" : "explique l'application"))));
   $("#ordre").placeholder = persona === "caro" ? "Caro, explique-moi…" : "Cortana, fais…";
+  const o = state.options, dispo = !!o.modele_renfort && o.renfort_actif && persona === "cortana";
+  $("#renfort").hidden = !dispo;
+  $("#renfort-btn").setAttribute("aria-pressed", renfortForce ? "true" : "false");
+  $("#renfort-txt").textContent = renfortForce ? `${o.modele_renfort} pour cette demande (crédits)`
+    : o.renfort_auto ? `Auto : ${o.modele_renfort} pour les grosses créations` : "Local gratuit ; touche pour forcer le renfort";
 }
 function rendreRoster() {
   const list = state.activite, auj = new Date().toDateString(), compte = {};
@@ -721,7 +743,8 @@ function rendreBlackbox() {
     box.append(h("button", { class: "tr" + (a.statut === "en_cours" ? " run" : ""), "aria-expanded": ouvert ? "true" : "false",
       onclick: () => { ouverts.has(a.id) ? ouverts.delete(a.id) : ouverts.add(a.id); rendreBlackbox(); } },
       h("span", { class: "statut " + a.statut }, h("span", { class: "dot " + ({ en_cours: "run", termine: "ok" }[a.statut] || "err") }), STATUTS[a.statut] || a.statut),
-      h("span", { class: "dem" }, a.demande, h("small", {}, h("span", { style: { color: couleur(de) } }, nomDe(de)),
+      h("span", { class: "dem" }, a.demande, a.renfort ? h("span", { class: "badge-renfort" }, "RENFORT") : null,
+        h("small", {}, h("span", { style: { color: couleur(de) } }, nomDe(de)),
         ` · ${a.source === "iphone" ? "iPhone" : "page"} · ${ago(a.debut)}`)),
       h("span", { class: "col-ag pts" }, agents.map((g) => h("i", { style: { "--c": couleur(g) }, title: nomDe(g) }))),
       h("span", { class: "col-et mono small muted" }, a.etapes.length),
@@ -732,7 +755,7 @@ function rendreBlackbox() {
           e.entree && Object.keys(e.entree).length ? h("div", {}, h("code", {}, court(e.entree))) : null))) : h("div", { class: "small muted", style: { padding: "8px 0" } }, `${nomDe(de)} répond sans outil.`),
       a.reponse ? h("div", { class: "reponse" }, a.reponse) : null,
       a.tokens && a.tokens.appels ? h("div", { class: "small muted mono", style: { marginTop: "6px" } },
-        `${a.tokens.entree.toLocaleString("fr-FR")} tokens lus · ${a.tokens.sortie.toLocaleString("fr-FR")} écrits · ${a.tokens.appels} appel${a.tokens.appels > 1 ? "s" : ""} au modèle`) : null,
+        `${a.tokens.entree.toLocaleString("fr-FR")} tokens lus · ${a.tokens.sortie.toLocaleString("fr-FR")} écrits · ${a.tokens.appels} appel${a.tokens.appels > 1 ? "s" : ""} au modèle${a.modele ? " · " + a.modele : ""}${a.renfort ? " (renfort, crédits)" : ""}`) : null,
       a.action ? h("div", { class: "action" }, "→ iPhone : " + [a.action.type, a.action.texte, a.action.url, a.action.date].filter(Boolean).join(" · ")) : null));
   }
 }
@@ -949,12 +972,17 @@ function rendreOptions() {
   $("#effort").replaceChildren(...state.efforts.map((e) => h("button", { type: "button", class: e === o.effort ? "on" : "", onclick: () => option({ effort: e }) }, e)));
   $("#effort-aide").textContent = AIDE[o.effort] || "";
   $("#web").checked = !!o.enable_web;
+  $("#renfort-options").hidden = !o.modele_renfort;
+  $("#renfort-modele").textContent = o.modele_renfort ? "Modèle : " + o.modele_renfort : "";
+  $("#renfort-actif").checked = !!o.renfort_actif;
+  $("#renfort-auto").checked = !!o.renfort_auto;
   $("#beacon-actif").checked = !!o.beacon_actif;
   if (document.activeElement !== $("#beacon-heure")) $("#beacon-heure").value = o.beacon_heure;
   const c = state.conso_jour || {};
   const rows = [["Moteur IA", o.fournisseur === "ollama" ? "Ollama (libre, gratuit)" : "Claude (clé API)"], ["Modèle", o.model],
     ["Modèle léger (Caro, spécialistes)", o.modele_leger],
-    ["Tokens aujourd'hui", `${((c.entree || 0) + (c.sortie || 0)).toLocaleString("fr-FR")} (${c.taches || 0} tâches, ~${(c.moyenne_par_tache || 0).toLocaleString("fr-FR")} par tâche)`], ["Secours si refus par erreur", o.fallbacks ? "activé" : "désactivé"],
+    ["Tokens aujourd'hui", `${((c.entree || 0) + (c.sortie || 0)).toLocaleString("fr-FR")} (${c.taches || 0} tâches, ~${(c.moyenne_par_tache || 0).toLocaleString("fr-FR")} par tâche)`],
+    ...(o.modele_renfort ? [["Dont renfort (crédits)", `${(c.renfort_tokens || 0).toLocaleString("fr-FR")} tokens · ${c.renfort_taches || 0} tâches`]] : []), ["Secours si refus par erreur", o.fallbacks ? "activé" : "désactivé"],
     ["Mémoire de conversation", o.session_ttl_hours + " h"], ["Fuseau", o.timezone], ["Serveur démarré", ago(state.demarre_depuis)]];
   $("#config").replaceChildren(...rows.map(([k, v]) => h("div", { class: "kv" }, h("span", { class: "muted" }, k), h("b", {}, v))));
 }
@@ -1011,7 +1039,8 @@ async function envoyer(texte) {
   texte = texte.trim(); if (!texte) return;
   $("#ordre-btn").disabled = true; $("#ordre").value = "";
   setTimeout(rafraichir, 350);
-  try { await api("/ask", { method: "POST", body: { text: texte, source: "web", persona } }); } catch (e) { toast(e.message); }
+  const avecRenfort = renfortForce; renfortForce = false; rendrePersona();
+  try { await api("/ask", { method: "POST", body: { text: texte, source: "web", persona, renfort: avecRenfort } }); } catch (e) { toast(e.message); }
   $("#ordre-btn").disabled = false; rafraichir();
 }
 function deconnexion() {
@@ -1045,6 +1074,9 @@ $("#bt-form").addEventListener("submit", async (e) => {
 });
 $("#web").addEventListener("change", (e) => option({ enable_web: e.target.checked }));
 $("#beacon-actif").addEventListener("change", (e) => option({ beacon_actif: e.target.checked }));
+$("#renfort-actif").addEventListener("change", (e) => option({ renfort_actif: e.target.checked }).then(rendrePersona));
+$("#renfort-auto").addEventListener("change", (e) => option({ renfort_auto: e.target.checked }).then(rendrePersona));
+$("#renfort-btn").addEventListener("click", () => { renfortForce = !renfortForce; rendrePersona(); });
 $("#beacon-heure").addEventListener("change", (e) => option({ beacon_heure: e.target.value }));
 $("#beacon-test").addEventListener("click", async () => {
   const b = $("#beacon-test"); b.disabled = true; b.textContent = "BEACON envoie…";

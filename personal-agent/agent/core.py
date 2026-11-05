@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -88,6 +89,13 @@ Pas pour les petites questions.
 """
 
 
+# Demandes qui méritent le modèle renfort : créations longues ou complexes (vérifié par mots-clés, sans appel IA).
+TACHE_LOURDE = re.compile(
+    r"\b(site|application|appli|app web|jeu|plan d'affaires|business plan|programme complet|logiciel|"
+    r"analyse (approfondie|complète|détaillée)|rapport complet|refais tout|architecture|tableau de bord complet)\b",
+    re.I)
+
+
 @dataclass
 class AgentReply:
     text: str
@@ -95,6 +103,8 @@ class AgentReply:
     stop_reason: str
     events: list[dict] = field(default_factory=list)
     tokens: dict = field(default_factory=lambda: {"entree": 0, "sortie": 0, "appels": 0})
+    modele: str = ""          # modèle réellement utilisé pour cette demande
+    renfort: bool = False     # True si le modèle renfort (payant) a servi
 
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -141,13 +151,20 @@ class Agent:
             "fallbacks": self.settings.fallbacks,
             "session_ttl_hours": self.settings.session_ttl_hours,
             "timezone": self.settings.timezone,
+            "modele_renfort": self.settings.modele_renfort,
+            "renfort_actif": saved.get("renfort_actif", True),
+            "renfort_auto": saved.get("renfort_auto", True),
             "beacon_actif": saved.get("beacon_actif", True),
             "beacon_heure": saved.get("beacon_heure", "08:00"),
         }
 
     def set_options(self, effort: str | None = None, enable_web: bool | None = None,
-                    beacon_actif: bool | None = None, beacon_heure: str | None = None) -> dict:
+                    beacon_actif: bool | None = None, beacon_heure: str | None = None,
+                    renfort_actif: bool | None = None, renfort_auto: bool | None = None) -> dict:
         changes: dict = {}
+        for cle, val in (("renfort_actif", renfort_actif), ("renfort_auto", renfort_auto)):
+            if val is not None:
+                changes[cle] = bool(val)
         if beacon_actif is not None:
             changes["beacon_actif"] = bool(beacon_actif)
         if beacon_heure is not None:
@@ -195,6 +212,16 @@ class Agent:
         return (self.settings.modele_leger or self.settings.model) if persona in ("caro", "specialiste") \
             else self.settings.model
 
+    def utiliser_renfort(self, persona: str, texte: str, demande: bool = False) -> bool:
+        """Le renfort (cloud, payant) seulement pour Cortana, en ligne, si configuré et activé :
+        quand on le demande, ou automatiquement pour une grosse création."""
+        opts = self.options()
+        if not self.settings.modele_renfort or persona != "cortana" or not opts["renfort_actif"]:
+            return False
+        if self.settings.fournisseur == "ollama" and not en_ligne():
+            return False
+        return demande or (opts["renfort_auto"] and (bool(TACHE_LOURDE.search(texte)) or len(texte) > 600))
+
     @staticmethod
     def historique_borne(history: list[dict], maxi: int) -> list[dict]:
         """Garde les derniers échanges, en coupant juste avant une vraie question (jamais entre un appel
@@ -207,12 +234,12 @@ class Agent:
                 return history[i:]
         return []
 
-    def _create(self, messages: list[dict], persona: str):
+    def _create(self, messages: list[dict], persona: str, modele: str | None = None):
         opts = self.options()
         try:
             response = creer_message(self.client, self.settings, system=self._system(persona), messages=messages,
                                      tools=self.outils(persona), effort=opts["effort"],
-                                     modele=self.modele_pour(persona))
+                                     modele=modele or self.modele_pour(persona))
         except Exception as e:
             etat.signaler("claude", False, type(e).__name__)
             raise
@@ -265,7 +292,8 @@ class Agent:
         return (textes[-1] if textes else "") or f"{nom} n'a rien trouvé."
 
     def ask(self, text: str, session_id: str = "iphone",
-            on_event: Callable[[dict], None] | None = None, persona: str = "cortana") -> AgentReply:
+            on_event: Callable[[dict], None] | None = None, persona: str = "cortana",
+            renfort: bool = False) -> AgentReply:
         """on_event reçoit chaque étape (outil appelé, recherche web) au fil de l'eau.
 
         Chaque voix a sa propre conversation (prompt système différent), d'où la session suffixée.
@@ -274,6 +302,8 @@ class Agent:
             raise ValueError(f"Voix inconnue : {persona}")
         session_id = f"{session_id}-{persona}"
         autorises = {t["name"] for t in self.outils(persona)}
+        avec_renfort = self.utiliser_renfort(persona, text, renfort)
+        modele = self.settings.modele_renfort if avec_renfort else self.modele_pour(persona)
         events: list[dict] = []
 
         def emit(event: dict) -> None:
@@ -295,7 +325,7 @@ class Agent:
 
         try:
             for _ in range(self.settings.max_tool_rounds):
-                response = self._create(messages, persona)
+                response = self._create(messages, persona, modele)
                 stop = response.stop_reason
                 e_, s_ = tokens(response)
                 conso["entree"] += e_
@@ -304,7 +334,8 @@ class Agent:
 
                 if stop == "refusal":
                     # On ne garde pas ce tour : la conversation reste dans son état précédent.
-                    return AgentReply("Désolé, je ne peux pas traiter cette demande.", None, stop, events, conso)
+                    return AgentReply("Désolé, je ne peux pas traiter cette demande.", None, stop, events, conso,
+                                      modele, avec_renfort)
 
                 messages.append({"role": "assistant", "content": _dump(response.content)})
                 if t := _final_text(response.content):
@@ -347,7 +378,7 @@ class Agent:
             reply += " (réponse tronquée)"
         conso["entree"] += self._tokens_specialistes["entree"]
         conso["sortie"] += self._tokens_specialistes["sortie"]
-        return AgentReply(reply, ctx.iphone_action, stop, events, conso)
+        return AgentReply(reply, ctx.iphone_action, stop, events, conso, modele, avec_renfort)
 
     def reset(self, session_id: str = "iphone") -> None:
         for persona in PERSONAS:

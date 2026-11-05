@@ -222,3 +222,39 @@ def test_economies_tokens_energie(tmp_path, monkeypatch):
          {"role": "user", "content": [{"type": "tool_result"}]}, {"role": "assistant", "content": "r"},
          {"role": "user", "content": "q2"}, {"role": "assistant", "content": "r2"}]
     assert Agent.historique_borne(h, 3) == h[4:]
+
+
+def test_modele_renfort(tmp_path, monkeypatch):
+    from anthropic.types import Message
+
+    from agent.config import load_settings
+    from agent.core import Agent
+
+    monkeypatch.setenv("AGENT_FOURNISSEUR", "ollama")
+    monkeypatch.setenv("AGENT_MODELE_RENFORT", "kimi-k3:cloud")
+    monkeypatch.setenv("AGENT_DATA_DIR", str(tmp_path))
+
+    class Fake:
+        def __init__(self):
+            self.calls, self.messages = [], self
+
+        def create(self, **kw):
+            self.calls.append(kw["model"])
+            return Message.model_validate({"id": "m", "type": "message", "role": "assistant", "model": kw["model"],
+                                           "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                                           "stop_sequence": None, "usage": {"input_tokens": 1, "output_tokens": 1}})
+
+    fake = Fake()
+    a = Agent(load_settings(), client=fake)
+    assert a.ask("Quel jour sommes-nous ?").renfort is False and fake.calls[-1] == "qwen3:8b"
+    r = a.ask("Crée-moi un site pour mon garage avec réservation")
+    assert r.renfort is True and r.modele == "kimi-k3:cloud" and fake.calls[-1] == "kimi-k3:cloud"
+    assert a.ask("Note : acheter du lait", renfort=True).renfort is True          # forcé par le bouton
+    assert a.ask("Crée un site", persona="caro").renfort is False                # jamais pour Caro
+    a.set_options(renfort_auto=False)
+    assert a.ask("Crée un site").renfort is False                                # plus d'automatique
+    a.set_options(renfort_actif=False)
+    assert a.ask("Crée un site", renfort=True).renfort is False                  # coupé dans les options
+    a.set_options(renfort_actif=True)
+    monkeypatch.setenv("AGENT_HORS_LIGNE", "1")
+    assert a.ask("Crée un site", renfort=True).renfort is False                  # jamais hors ligne

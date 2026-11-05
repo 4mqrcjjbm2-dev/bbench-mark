@@ -32,6 +32,8 @@ Le script fait tout le reste :
 | Carte graphique 16 à 24 Go | `qwen3:32b` ou `gpt-oss:20b` : rapide et bien meilleur |
 | Petit serveur, mais tu veux la qualité | un modèle cloud gratuit d'Ollama (liste sur [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud)), après `docker compose exec ollama ollama signin` |
 
+**Modèle renfort (optionnel).** Garde un modèle local gratuit comme moteur, et ajoute un gros modèle cloud d'Ollama pour les grosses créations : `AGENT_MODELE_RENFORT=kimi-k3:cloud` dans `.env`, puis `docker compose exec ollama ollama signin`. Jarvis l'utilise automatiquement pour un site, une appli ou une analyse complète, ou quand tu touches **RENFORT**. Il n'est jamais utilisé hors ligne ni par Caro, et sa consommation est affichée à part, puisqu'il coûte des crédits selon ton abonnement Ollama.
+
 Les petits modèles libres se trompent plus souvent que les grands. Si un résultat ne te convient pas, prends un modèle plus gros.
 
 ### Le Savoir hors ligne (Wikipédia sans Internet)

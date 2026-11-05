@@ -43,6 +43,7 @@ class Settings:
     modele_leger: str         # modèle plus petit pour Caro et les spécialistes ("" = le même)
     historique_max: int       # messages gardés en contexte avec Ollama (vitesse, énergie)
     kiwix_url: str            # Wikipédia hors ligne (kiwix-serve) ; vide = pas installé
+    modele_renfort: str       # gros modèle cloud pour les grosses créations (ex. kimi-k3:cloud) ; vide = aucun
 
 
 def load_settings() -> Settings:
@@ -66,4 +67,5 @@ def load_settings() -> Settings:
         modele_leger=os.environ.get("AGENT_MODELE_LEGER", ""),
         historique_max=int(os.environ.get("AGENT_HISTORIQUE_MAX", "24")),
         kiwix_url=os.environ.get("KIWIX_URL", "").rstrip("/"),
+        modele_renfort=os.environ.get("AGENT_MODELE_RENFORT", ""),
     )

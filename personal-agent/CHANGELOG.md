@@ -3,6 +3,11 @@
 Chaque évolution, la plus récente en haut : ce qui change, pourquoi, et comment c'est vérifié.
 Les propositions en attente sont dans le Cerveau : `cerveaux-/memoire/a-faire.md`, section « Évolutions proposées ».
 
+## 2026-11-05 · Modèle renfort
+- **`AGENT_MODELE_RENFORT`** (ex. `kimi-k3:cloud`) : un gros modèle cloud qui prend le relais seulement pour Cortana, en ligne. Il s'active automatiquement pour les grosses créations (site, appli, jeu, plan d'affaires, analyse complète, demande très longue) ou avec le bouton **RENFORT**. Le modèle local gratuit reste le moteur par défaut.
+- Chaque tâche faite par le renfort porte un badge et le nom du modèle ; sa consommation est comptée à part (« Dont renfort (crédits) »). Options : renfort disponible oui/non, automatique oui/non.
+- Vérifié : tests du choix du modèle (auto, forcé, Caro, hors ligne, désactivé).
+
 ## 2026-11-05 · Savoir hors ligne, mode hors ligne, images
 - **Wikipédia hors ligne** (Kiwix, open source) : outil `encyclopedie`, qui cherche et renvoie directement le meilleur article en un seul appel (moins de tokens). Installation : `./deploy/telecharger-savoir.sh moyen` (Wikipédia française sans images, option Wiktionnaire).
 - **Mode hors ligne automatique** (`AGENT_HORS_LIGNE=auto`) : sans Internet, les outils qui en ont besoin ne sont même plus décrits au modèle. Moins d'erreurs et moins de tokens. Un outil sans service installé (ex. encyclopédie sans Kiwix) n'est pas envoyé non plus.
