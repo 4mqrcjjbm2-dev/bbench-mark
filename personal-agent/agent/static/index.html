@@ -104,6 +104,7 @@ button.agent { text-align: left; width: 100%; color: inherit; }
 .demande { border: 1px solid var(--line); border-left: 3px solid var(--jaune); border-radius: 12px; padding: 12px; background: rgba(11,18,32,.7); display: grid; gap: 8px; }
 .demande.attente { border-color: var(--jaune); box-shadow: 0 0 22px -10px var(--jaune); }
 .demande code { font: 13px var(--f-mono); color: var(--jaune); overflow-wrap: anywhere; white-space: pre-wrap; }
+.demande details summary { cursor: pointer; color: var(--turq); }
 .demande pre { margin: 0; font: 12px var(--f-mono); color: var(--muted); white-space: pre-wrap; max-height: 180px; overflow: auto; background: rgba(4,7,13,.6); padding: 8px; border-radius: 8px; }
 .demande .actions { display: flex; gap: 8px; }
 .demande .actions .btn { flex: 1; }
@@ -358,6 +359,7 @@ svg.courbe { width: 100%; height: 120px; display: block; }
       <div class="titre"><h2>Connexions</h2><span class="sous">tout ce qui est branché</span></div>
       <div class="grid g2">
         <div class="hud" id="liste-cx"></div>
+        <div class="hud" style="--acc:var(--mauve)" id="systeme"><h3>État du serveur</h3><div id="systeme-corps"></div></div>
         <div class="hud" style="--acc:var(--orange)"><h3>Clés API</h3>
           <p class="small muted" style="margin:0 0 10px">Colle une clé ici : l'agent s'active tout de suite, sans redémarrer. Elle reste sur ton serveur et ne s'affiche jamais en entier.</p>
           <div id="liste-cles"></div></div>
@@ -767,7 +769,8 @@ const CREER_VITE = ["Crée mon CV en PDF à partir de mes infos", "Fais un budge
   "Cherche les meilleures offres de forfait cellulaire au Québec et fais-moi un tableau"];
 const TYPE_COUL = { docx: "#4da3ff", pdf: "#ff5c7a", md: "#8fa6b8", xlsx: "#c6ff4d", html: "#1ce6d7", css: "#b26bff",
   js: "#ffe14d", py: "#ffe14d", json: "#ff9f43", csv: "#c6ff4d" };
-const DEM_STATUT = { en_attente: "en attente de ton OK", en_cours: "en cours", terminee: "terminée", echec: "en échec", refusee: "refusée" };
+const DEM_STATUT = { en_attente: "en attente de ton OK", en_cours: "en cours", terminee: "terminée", echec: "en échec", refusee: "refusée", annulee: "annulée" };
+const DEM_TYPE = { commande: "COMMANDE", ecrire: "FICHIER HORS ATELIER", evolution: "ÉVOLUTION DE JARVIS" };
 function rendreAtelier() {
   $("#atelier-racine").textContent = "Dossier de création : " + state.atelier_racine;
   const cv = $("#creer-vite");
@@ -777,19 +780,27 @@ function rendreAtelier() {
 
   const dem = [...state.demandes].sort((a, b) => (b.statut === "en_attente") - (a.statut === "en_attente")).slice(0, 6);
   $("#demandes").replaceChildren(...dem.map((d) => {
-    const quoi = d.type === "commande" ? d.details.commande : `Écrire ${d.details.chemin}`;
+    const evo = d.type === "evolution";
+    const quoi = d.type === "commande" ? d.details.commande : evo ? d.details.titre : `Écrire ${d.details.chemin}`;
     const attente = d.statut === "en_attente";
+    const fichiers = evo ? Object.entries(d.details.stats || {}).map(([f, st]) =>
+      h("div", { class: "small mono" }, `${st.nouveau ? "+ " : ""}${f}  `, h("span", { class: "up" }, `+${st.ajouts}`), " ", h("span", { class: "down" }, `-${st.retraits}`))) : [];
     return h("div", { class: "demande" + (attente ? " attente" : "") },
       h("div", { style: { display: "flex", gap: "8px", alignItems: "baseline" } },
-        h("b", { style: { flex: 1, font: "600 13px var(--f-titre)", letterSpacing: ".08em" } }, `DEMANDE N° ${d.id} · ${d.type === "commande" ? "COMMANDE" : "FICHIER HORS ATELIER"}`),
+        h("b", { style: { flex: 1, font: "600 13px var(--f-titre)", letterSpacing: ".08em" } }, `DEMANDE N° ${d.id} · ${DEM_TYPE[d.type] || d.type}`),
         h("span", { class: "small mono", style: { color: attente ? "var(--jaune)" : d.statut === "terminee" ? "var(--turq)" : "var(--down)" } }, DEM_STATUT[d.statut] || d.statut)),
       h("code", {}, quoi),
       d.raison ? h("div", { class: "small muted" }, "Pourquoi : " + d.raison) : null,
+      ...fichiers,
+      evo && d.details.diff ? h("details", {}, h("summary", { class: "small" }, "Voir les changements"), h("pre", {}, d.details.diff)) : null,
+      evo && attente ? h("div", { class: "small muted" }, "« Tester et appliquer » lance tous les tests sur une copie. Si un seul échoue, rien ne change.") : null,
       d.details.dossier ? h("div", { class: "small muted mono" }, "Dossier : " + d.details.dossier) : null,
       attente ? h("div", { class: "actions" },
-        h("button", { class: "btn", type: "button", onclick: () => modifier(`/api/demandes/${d.id}/autoriser`, { method: "POST" }) }, "Autoriser"),
+        h("button", { class: "btn", type: "button", onclick: () => modifier(`/api/demandes/${d.id}/autoriser`, { method: "POST" }) }, evo ? "Tester et appliquer" : "Autoriser"),
         h("button", { class: "btn danger", type: "button", onclick: () => modifier(`/api/demandes/${d.id}/refuser`, { method: "POST" }) }, "Refuser")) : null,
-      d.resultat ? h("pre", {}, `code ${d.resultat.code}\n${d.resultat.sortie || "(aucune sortie)"}`) : null);
+      d.resultat ? h("pre", {}, `code ${d.resultat.code}\n${d.resultat.sortie || "(aucune sortie)"}`) : null,
+      evo && d.statut === "terminee" && d.resultat && d.resultat.annulable ? h("button", { class: "btn danger", type: "button",
+        onclick: () => modifier(`/api/demandes/${d.id}/annuler`, { method: "POST" }) }, "Annuler cette évolution") : null);
   }));
 
   const g = $("#galerie");
@@ -950,6 +961,22 @@ function rendreCles(force) {
       k.configuree && k.source !== "env" ? h("button", { class: "btn danger", type: "button", onclick: () => modifier("/api/cles/" + k.nom, { method: "DELETE" }) }, "Retirer la clé") : null);
   }));
 }
+function rendreSysteme() {
+  const x = state.systeme; if (!x) return;
+  const go = (v) => v == null ? "?" : v.toLocaleString("fr-FR") + " Go";
+  const lignes = [
+    ["Mémoire vive", `${go(x.memoire_libre_go)} libres sur ${go(x.memoire_go)}`],
+    ["Disque", `${go(x.disque_libre_go)} libres sur ${go(x.disque_total_go)}`],
+    ["Processeurs", `${x.processeurs ?? "?"}${x.charge != null ? " · charge " + x.charge : ""}`],
+    ["Carte graphique", x.gpu ? `${x.gpu.nom} · ${go(x.gpu.memoire_go)}` : "aucune détectée"],
+    ["Modèle conseillé ici", x.modele_conseille],
+    ...(x.ollama ? [["Modèles téléchargés", x.ollama.installes.length ? x.ollama.installes.map((m) => `${m.nom} (${m.taille_go} Go)`).join(", ") : "aucun"],
+                    ["En mémoire", x.ollama.en_memoire.join(", ") || "aucun (déchargé pour économiser)"]] : []),
+    ...(x.perf && x.perf.modele ? [["Vitesse mesurée", `${x.perf.modele} · ${x.perf.tokens_par_seconde ?? "?"} jetons/s · ${x.perf.secondes} s le dernier appel`]] : []),
+  ];
+  $("#systeme-corps").replaceChildren(...lignes.map(([k, v]) => h("div", { class: "kv" }, h("span", { class: "muted" }, k), h("b", {}, v))),
+    ...x.remarques.map((r) => h("p", { class: "small", style: { margin: "8px 0 0", color: r === "Tout est en ordre." ? "var(--turq)" : "var(--jaune)" } }, r)));
+}
 async function copier(t) { try { await navigator.clipboard.writeText(t); toast("Copié"); } catch { toast(t); } }
 
 // ---------- CAPACITÉS ----------
@@ -1021,7 +1048,7 @@ function rendreRoadmap() {
 // ---------- Boucle de rafraîchissement ----------
 function rendre() {
   agentsParId = Object.fromEntries(state.agents.map((a) => [a.id, a]));
-  majSalle(); rendreBlackbox(); rendreAtelier(); rendreCerveau(); rendreBacktests(); rendreTaches(); rendreConnexions(); rendreCles(); rendreCapacites(); rendreOptions();
+  majSalle(); rendreBlackbox(); rendreAtelier(); rendreCerveau(); rendreBacktests(); rendreTaches(); rendreConnexions(); rendreSysteme(); rendreCles(); rendreCapacites(); rendreOptions();
 }
 let timer;
 async function rafraichir() {

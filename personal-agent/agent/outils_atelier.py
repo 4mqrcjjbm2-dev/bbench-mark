@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 
 from . import savoir, web
 from .atelier import AtelierErreur
+from .evolution import EvolutionErreur
 
 
 class ActionErreur(Exception):
@@ -81,6 +82,33 @@ def creer_image_svg(ctx, args: dict) -> str:
     a = _atelier(ctx)
     rel = a.ecrire(f"images/{a.nom_fichier(str(args.get('nom') or ''), 'image')}.svg", svg)
     return f"Image créée : {rel} (lien : {_lien(rel)})."
+
+
+def _evolution(ctx):
+    if not getattr(ctx, "evolution", None):
+        raise ActionErreur("L'auto-évolution n'est pas disponible.")
+    return ctx.evolution
+
+
+def lister_code_jarvis(ctx, args: dict) -> str:
+    return "\n".join(_evolution(ctx).lister())
+
+
+def lire_code_jarvis(ctx, args: dict) -> str:
+    return _evolution(ctx).lire(str(args.get("chemin") or ""), int(args.get("debut") or 1), int(args.get("lignes") or 400))
+
+
+def proposer_evolution(ctx, args: dict) -> str:
+    _ecriture_permise(ctx)
+    fichiers = args.get("fichiers") or {}
+    if isinstance(fichiers, list):
+        fichiers = {f.get("chemin"): f.get("contenu", "") for f in fichiers if isinstance(f, dict)}
+    d = _evolution(ctx).proposer(str(args.get("titre") or "Amélioration"), str(args.get("raison") or ""), fichiers)
+    s = d["details"]["stats"]
+    resume = ", ".join(f"{k} (+{v['ajouts']}/-{v['retraits']})" for k, v in s.items())
+    return (f"Évolution n° {d['id']} proposée : {resume}. Rien n'est modifié. Quand le propriétaire touchera "
+            "« Autoriser », TOUS les tests tourneront sur une copie ; si un seul échoue, rien ne change. "
+            "Sinon : sauvegarde, application et redémarrage, avec un bouton « Annuler ».")
 
 
 def atelier_ecrire(ctx, args: dict) -> str:
@@ -198,8 +226,20 @@ OUTILS_ATELIER: list[tuple[dict, Callable]] = [
     ({"name": "executer_commande", "description": "Demande à exécuter une commande sur la machine (installer, "
       "lancer un script, tester). Ne s'exécute qu'après l'autorisation du propriétaire dans la page.",
       "input_schema": _obj({"commande": S, "dossier": S, "raison": S}, ["commande", "raison"])}, executer_commande),
+    ({"name": "lister_code_jarvis", "description": "Liste les fichiers du code de Jarvis lui-même (agent/, tests/).",
+      "input_schema": _obj({}, [])}, lister_code_jarvis),
+    ({"name": "lire_code_jarvis", "description": "Lit un fichier du code de Jarvis, avec numéros de ligne (par morceaux).",
+      "input_schema": _obj({"chemin": S, "debut": {"type": "integer"}, "lignes": {"type": "integer"}}, ["chemin"])},
+     lire_code_jarvis),
+    ({"name": "proposer_evolution", "description": ("Propose d'améliorer le code de Jarvis lui-même : donne le contenu "
+      "COMPLET des fichiers modifiés (agent/…) et, si utile, un NOUVEAU fichier tests/test_….py qui prouve le changement. "
+      "Lis d'abord le fichier avec lire_code_jarvis. Rien n'est appliqué sans l'autorisation du propriétaire ; tous les "
+      "tests doivent passer."),
+      "input_schema": _obj({"titre": S, "raison": S, "fichiers": {"type": "object", "description": "chemin → contenu complet",
+                                                                  "additionalProperties": S}}, ["titre", "raison", "fichiers"])},
+     proposer_evolution),
     ({"name": "etat_demande", "description": "Statut et résultat d'une demande d'autorisation.",
       "input_schema": _obj({"id": S}, ["id"])}, etat_demande),
 ]
 
-ERREURS = (ActionErreur, AtelierErreur)
+ERREURS = (ActionErreur, AtelierErreur, EvolutionErreur)

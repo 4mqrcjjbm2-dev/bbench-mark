@@ -11,6 +11,7 @@ services:
       AGENT_ATELIER: /atelier
       KIWIX_URL: ${KIWIX_URL:-}  # rempli par deploy/telecharger-savoir.sh
     volumes:
+      - ..:/repo                # le dépôt lui-même : Jarvis tourne sur ce code et peut l'améliorer (auto-évolution)
       - ./data:/data            # tâches, notes, activité, clés (coffre)
       - ./atelier:/atelier      # tout ce que Jarvis crée
       # Mémoire du Cerveau : décommente et ajoute AGENT_CERVEAU_DIR=/cerveau dans .env
@@ -22,6 +23,8 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    ports:
+      - "127.0.0.1:11434:11434" # pour Claude Code sur la même machine (deploy/claude-local.sh), jamais vers l'extérieur
     environment:
       OLLAMA_KEEP_ALIVE: 5m       # décharge le modèle après 5 min sans demande : moins de mémoire, moins d'énergie
       OLLAMA_NUM_PARALLEL: "1"    # une demande à la fois : moins de mémoire sur un petit serveur

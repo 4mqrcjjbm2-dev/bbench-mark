@@ -28,7 +28,7 @@ class ToolContext:
 
     def __init__(self, store: JsonStore, timezone: str, http: httpx.Client | None = None,
                  cerveau: Cerveau | None = None, cles=None, specialiste=None, lecture_seule: bool = False,
-                 atelier=None, searxng_url: str = "", kiwix_url: str = "") -> None:
+                 atelier=None, searxng_url: str = "", kiwix_url: str = "", evolution=None) -> None:
         self.store = store
         self.timezone = timezone
         self.http = http or httpx.Client(timeout=15, headers={"User-Agent": "Jarvis-personnel/1.0"})
@@ -39,6 +39,7 @@ class ToolContext:
         self.atelier = atelier            # atelier.Atelier : création de fichiers et demandes d'autorisation
         self.searxng_url = searxng_url
         self.kiwix_url = kiwix_url        # le Savoir hors ligne (Kiwix)
+        self.evolution = evolution        # evolution.Evolution : Jarvis qui améliore son propre code
         self.iphone_action: dict | None = None
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -16,6 +17,8 @@ from .llm import creer_client, creer_message, tokens
 from .reseau import OUTILS_INTERNET, en_ligne
 from .cerveau import Cerveau
 from .cles import Cles
+from .evolution import Evolution
+from .systeme import noter_perf
 from .config import Settings
 from .storage import JsonStore
 from .catalogue import AGENT_PAR_OUTIL, GUIDE_APP, OUTILS_LECTURE, PERSONAS, resume_catalogue
@@ -57,6 +60,9 @@ Meilleur chemin : avant d'agir, choisis la façon qui a le plus de chances de r�
 Autocorrection : après avoir créé du code ou un site, appelle verifier_fichier et corrige jusqu'à ok=true. \
 Si un outil échoue, lis l'erreur et corrige (3 essais au plus sur la même approche), puis passe au plan B, \
 puis à une autre voie (autre outil, recherche web). Ne demande au propriétaire que le seul geste qui te manque.
+S'améliorer : si le propriétaire demande d'améliorer Jarvis lui-même (une fonction, l'interface, une économie), \
+lis le code concerné (lister_code_jarvis, lire_code_jarvis), puis proposer_evolution avec le contenu COMPLET des \
+fichiers et un nouveau test. Petit changement ciblé, un seul sujet par proposition.
 Agir sur la machine : executer_commande crée une demande d'autorisation ; dis au propriétaire d'autoriser \
 dans la page (section Atelier), puis consulte le résultat avec etat_demande.
 Savoir : pour un fait stable (histoire, science, lieux, définitions), utilise d'abord encyclopedie (hors ligne, \
@@ -136,6 +142,7 @@ class Agent:
         self.cerveau = Cerveau(settings.cerveau_dir, settings.cerveau_push, settings.timezone) \
             if settings.cerveau_dir else None
         self.atelier = Atelier(settings.atelier_dir, self.store)
+        self.evolution = Evolution(settings.source_dir, self.store, settings.data_dir)
         self.cles = Cles(settings.data_dir)
         self.cles.generer_auto()  # sujet ntfy : rien à faire pour le propriétaire
 
@@ -236,14 +243,16 @@ class Agent:
 
     def _create(self, messages: list[dict], persona: str, modele: str | None = None):
         opts = self.options()
+        modele = modele or self.modele_pour(persona)
+        debut = time.monotonic()
         try:
             response = creer_message(self.client, self.settings, system=self._system(persona), messages=messages,
-                                     tools=self.outils(persona), effort=opts["effort"],
-                                     modele=modele or self.modele_pour(persona))
+                                     tools=self.outils(persona), effort=opts["effort"], modele=modele)
         except Exception as e:
             etat.signaler("claude", False, type(e).__name__)
             raise
-        etat.signaler("claude", True, f"{self.settings.fournisseur} · {self.settings.model}")
+        etat.signaler("claude", True, f"{self.settings.fournisseur} · {modele}")
+        noter_perf(modele, time.monotonic() - debut, tokens(response)[1])
         return response
 
     def specialiste(self, agent: str, demande: str) -> str:
@@ -320,7 +329,7 @@ class Agent:
         ctx = ToolContext(self.store, self.settings.timezone, cerveau=self.cerveau, cles=self.cles,
                           specialiste=self.specialiste, lecture_seule=(persona == "caro"),
                           atelier=self.atelier, searxng_url=self.settings.searxng_url,
-                          kiwix_url=self.settings.kiwix_url)
+                          kiwix_url=self.settings.kiwix_url, evolution=self.evolution)
         texts: list[str] = []
 
         try:

@@ -36,6 +36,7 @@ from typing import Literal
 from .catalogue import CARO_CATALOGUE, GROUPES, PERSONAS, agents_pour_page
 from .agents_outils import envoyer_notification, rapport_texte
 from .cles import CLES
+from .systeme import etat as etat_systeme
 from .tools import CAPACITES, ToolContext, ToolError, lancer_backtest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -382,6 +383,7 @@ def state() -> dict:
         "capacites": CAPACITES,
         "demarre_depuis": _started,
         "conso_jour": _conso_jour(agent),
+        "systeme": _en_cache("systeme", 30, lambda: etat_systeme(settings)),
     }
 
 
@@ -556,15 +558,21 @@ def demande_autoriser(did: str) -> dict:
     agent.store.update_item("demandes", did, statut="en_cours", autorisee=time.time())
 
     def run() -> None:
-        res = agent.atelier.executer_demande(d)
+        try:
+            res = agent.evolution.appliquer(d) if d["type"] == "evolution" else agent.atelier.executer_demande(d)
+        except Exception as e:  # noqa: BLE001
+            res = {"code": 1, "sortie": f"Erreur : {e}"}
         agent.store.update_item("demandes", did, statut="terminee" if res["code"] == 0 else "echec",
                                 resultat=res, fin=time.time())
+        if res.get("redemarrer"):
+            _redemarrer()
         topic = agent.cles.get("NTFY_TOPIC")
         if topic:
             try:
                 ctx = ToolContext(agent.store, settings.timezone)
                 envoyer_notification(ctx.http, topic, "Jarvis : demande " + ("réussie" if res["code"] == 0 else "en échec"),
-                                     (d["details"].get("commande") or d["details"].get("chemin", "")) + "\n"
+                                     (d["details"].get("commande") or d["details"].get("chemin")
+                                      or d["details"].get("titre", "")) + "\n"
                                      + res["sortie"][-500:])
                 ctx.http.close()
             except Exception:  # noqa: BLE001 - la notification est un bonus
@@ -579,4 +587,33 @@ def demande_refuser(did: str) -> dict:
     agent = get_agent()
     _trouver_demande(agent, did)
     agent.store.update_item("demandes", did, statut="refusee", fin=time.time())
+    return {"ok": True}
+
+
+def _redemarrer(delai: float = 3) -> None:
+    """Relance Jarvis pour charger son nouveau code : le processus s'arrête, et Docker (restart: unless-stopped),
+    systemd (Restart=always) ou launchd (KeepAlive) le relancent aussitôt."""
+    if os.environ.get("JARVIS_REDEMARRAGE_AUTO", "1") == "0":
+        return
+
+    def stop() -> None:
+        time.sleep(delai)
+        log.info("Redémarrage pour charger le nouveau code")
+        os._exit(0)
+    threading.Thread(target=stop, daemon=True).start()
+
+
+@app.post("/api/demandes/{did}/annuler", dependencies=auth)
+def demande_annuler(did: str) -> dict:
+    """Annule une évolution déjà appliquée : restaure la sauvegarde et redémarre."""
+    agent = get_agent()
+    d = next((x for x in agent.store.list_items("demandes") if x["id"] == did), None)
+    if not d or d["type"] != "evolution" or d["statut"] != "terminee" or not (d.get("resultat") or {}).get("annulable"):
+        raise HTTPException(409, "Cette évolution ne peut pas être annulée")
+    try:
+        res = agent.evolution.annuler(d)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Annulation impossible : {e}") from e
+    agent.store.update_item("demandes", did, statut="annulee", resultat=res, fin=time.time())
+    _redemarrer()
     return {"ok": True}

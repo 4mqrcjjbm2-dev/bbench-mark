@@ -3,6 +3,12 @@
 Chaque évolution, la plus récente en haut : ce qui change, pourquoi, et comment c'est vérifié.
 Les propositions en attente sont dans le Cerveau : `cerveaux-/memoire/a-faire.md`, section « Évolutions proposées ».
 
+## 2026-11-07 · Prêt à installer · Jarvis qui s'améliore lui-même
+- **Auto-évolution** (`proposer_evolution`, `lire_code_jarvis`, `lister_code_jarvis`) : Cortana propose de changer le code de Jarvis lui-même. Le différentiel est visible dans l'Atelier. « Tester et appliquer » lance tous les tests sur une copie et n'applique rien si un seul échoue ; sinon sauvegarde, application, commit git local et redémarrage. « Annuler cette évolution » restaure la version précédente. Les tests existants ne peuvent pas être modifiés, seulement complétés.
+- **État du serveur** (Connexions) : mémoire, disque, processeurs, carte graphique, modèles téléchargés et en mémoire, vitesse réelle du modèle, modèle conseillé et remarques (« trop lent », « disque presque plein »…).
+- **Installation** : `INSTALLATION.md` pas à pas ; l'installateur choisit le modèle selon la mémoire, propose de cloner le Cerveau et finit par un diagnostic ; `deploy/verifier.sh` (✔/✘ + la solution) ; `deploy/claude-local.sh` (Claude Code sur l'ordinateur via Ollama) ; Docker utilise le code du dépôt (nécessaire à l'auto-évolution), Ollama accessible en local pour Claude Code.
+- Vérifié : 46 tests. Non testé : une vraie installation Docker (pas de Docker ni de réseau dans la session).
+
 ## 2026-11-05 · Modèle renfort
 - **`AGENT_MODELE_RENFORT`** (ex. `kimi-k3:cloud`) : un gros modèle cloud qui prend le relais seulement pour Cortana, en ligne. Il s'active automatiquement pour les grosses créations (site, appli, jeu, plan d'affaires, analyse complète, demande très longue) ou avec le bouton **RENFORT**. Le modèle local gratuit reste le moteur par défaut.
 - Chaque tâche faite par le renfort porte un badge et le nom du modèle ; sa consommation est comptée à part (« Dont renfort (crédits) »). Options : renfort disponible oui/non, automatique oui/non.

@@ -18,7 +18,8 @@ PERSONAS = {
         "outils": ["note_ajouter", "notes_lister", "note_supprimer", "tache_ajouter", "taches_lister",
                    "tache_terminer", "date_heure", "action_iphone", "creer_document", "creer_tableur",
                    "creer_site", "atelier_ecrire", "atelier_lire", "atelier_lister", "verifier_fichier",
-                   "executer_commande", "etat_demande", "creer_image_svg"],
+                   "executer_commande", "etat_demande", "creer_image_svg", "lister_code_jarvis",
+                   "lire_code_jarvis", "proposer_evolution"],
     },
     "caro": {
         "id": "caro", "nom": "Caro", "couleur": "#b26bff",
@@ -33,7 +34,8 @@ OUTILS_LECTURE = {"prix_crypto", "marche_crypto", "notes_lister", "taches_lister
                   "memoire_lire", "agents_catalogue", "web_search", "web_fetch", "tendances_crypto",
                   "marches_financiers", "matieres_premieres", "analyse_technique", "portefeuille_public",
                   "rapport_du_jour", "consulter_specialiste", "recherche_web", "lire_page",
-                  "atelier_lire", "atelier_lister", "verifier_fichier", "etat_demande", "encyclopedie"}
+                  "atelier_lire", "atelier_lister", "verifier_fichier", "etat_demande", "encyclopedie",
+                  "lister_code_jarvis", "lire_code_jarvis"}
 
 # --- Groupes (couleurs Neurolab) -------------------------------------------------------------
 GROUPES = {
@@ -231,5 +233,8 @@ dans la section Atelier de la page. Toute commande sur la machine, et tout fichi
 une autorisation : « Autoriser » dans la page, section Atelier.
 Savoir hors ligne : Wikipédia et d'autres encyclopédies (Kiwix) consultables sans Internet, par PRISM.
 Mode hors ligne : sans Internet, les outils qui en ont besoin sont mis de côté automatiquement.
+Auto-évolution : Cortana peut proposer d'améliorer le code de Jarvis lui-même. Le propriétaire autorise ; \
+tous les tests tournent sur une copie, rien ne change si un seul échoue ; sinon sauvegarde, application, \
+redémarrage, et un bouton « Annuler ».
 Moteur IA : libre et gratuit avec Ollama (modèle open source), ou Claude avec une clé.
 Clés API : elles se collent dans la page, section Connexions → Clés API, et s'activent tout de suite."""

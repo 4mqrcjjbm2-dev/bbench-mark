@@ -44,13 +44,14 @@ class Settings:
     historique_max: int       # messages gardés en contexte avec Ollama (vitesse, énergie)
     kiwix_url: str            # Wikipédia hors ligne (kiwix-serve) ; vide = pas installé
     modele_renfort: str       # gros modèle cloud pour les grosses créations (ex. kimi-k3:cloud) ; vide = aucun
+    source_dir: Path          # le code de Jarvis lui-même (pour qu'il puisse proposer de l'améliorer)
 
 
 def load_settings() -> Settings:
     fournisseur = os.environ.get("AGENT_FOURNISSEUR", "ollama").lower()
     return Settings(
         agent_token=os.environ.get("AGENT_TOKEN", ""),
-        model=os.environ.get("AGENT_MODEL", "qwen3:8b" if fournisseur == "ollama" else "claude-opus-5-5"),
+        model=os.environ.get("AGENT_MODEL") or ("qwen3:8b" if fournisseur == "ollama" else "claude-opus-5-5"),
         effort=os.environ.get("AGENT_EFFORT", "low"),
         data_dir=Path(os.environ.get("AGENT_DATA_DIR", ROOT / "data")),
         session_ttl_hours=float(os.environ.get("AGENT_SESSION_TTL_HOURS", "6")),
@@ -68,4 +69,5 @@ def load_settings() -> Settings:
         historique_max=int(os.environ.get("AGENT_HISTORIQUE_MAX", "24")),
         kiwix_url=os.environ.get("KIWIX_URL", "").rstrip("/"),
         modele_renfort=os.environ.get("AGENT_MODELE_RENFORT", ""),
+        source_dir=Path(os.environ.get("JARVIS_SOURCE", ROOT)).expanduser(),
     )

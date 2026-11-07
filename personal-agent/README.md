@@ -11,6 +11,8 @@ Claude reste possible en option, si un jour tu ajoutes une clé : `AGENT_FOURNIS
 
 ### Installer en une commande (serveur Linux, Ubuntu ou Debian)
 
+**Guide complet pas à pas : [INSTALLATION.md](INSTALLATION.md).**
+
 ```bash
 git clone <ton dépôt> && cd bbench-mark/personal-agent
 ./deploy/installer-serveur.sh qwen3:8b       # ou qwen3:14b, gpt-oss:20b… selon la mémoire du serveur
